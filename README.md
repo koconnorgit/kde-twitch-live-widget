@@ -7,6 +7,10 @@ browser.
 It's frameless and transparent, so it sits cleanly on your desktop — when
 nobody's live it simply disappears.
 
+<p align="center">
+  <img src="package/screenshot.png" alt="Twitch Live widget showing several live channels" width="420">
+</p>
+
 ---
 
 ## Features

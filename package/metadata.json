@@ -8,7 +8,7 @@
         ],
         "Category": "Online Services",
         "Description": "Shows which of your favorite Twitch streamers are live and lets you jump to their channel.",
-        "Icon": "live-stream",
+        "Icon": "media-record",
         "Id": "io.github.koconnorgit.twitchlive",
         "License": "MIT",
         "Name": "Twitch Live",
