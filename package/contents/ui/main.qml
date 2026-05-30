@@ -10,10 +10,10 @@ PlasmoidItem {
     id: root
 
     // ------------------------------------------------------------------
-    // Publisher config: hardcode your PUBLIC-client Client ID here for a
-    // public release so end users never have to enter it. If left empty,
-    // the value from the settings dialog (Plasmoid.configuration.clientId)
-    // is used instead.
+    // Publisher config: the PUBLIC-client Client ID shipped with the widget,
+    // so end users never enter one. There is no Client ID field in settings;
+    // the Plasmoid.configuration.clientId fallback below only applies if a
+    // forker leaves embeddedClientId empty and sets it manually in the config.
     // ------------------------------------------------------------------
     readonly property string embeddedClientId: "0voosrrcycnc46i7nldbgaqx5aeosj"
     readonly property string clientId: (root.embeddedClientId
@@ -372,7 +372,7 @@ PlasmoidItem {
         onClicked: root.expanded = !root.expanded
         Kirigami.Icon {
             anchors.fill: parent
-            source: "live-stream"
+            source: "media-record"
             active: parent.containsMouse
 
             Rectangle { // count badge
@@ -399,7 +399,7 @@ PlasmoidItem {
     //   • linked + live   → just the clickable streamer names
     //   • linked + none   → nothing (a faint hint appears on hover)
     //   • unlinked/linking → the link/approve UI
-    //   • hovering         → small refresh/relink/configure controls appear
+    //   • hovering         → small refresh/configure controls appear
     // ------------------------------------------------------------------
     fullRepresentation: Item {
         id: rep

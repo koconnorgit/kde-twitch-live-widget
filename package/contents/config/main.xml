@@ -5,9 +5,9 @@
                           http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
     <kcfgfile name=""/>
     <group name="General">
-        <!-- Twitch application Client ID (PUBLIC client type).
-             Only the publisher needs to set this once; end users never do.
-             For a public release you can hardcode it in ui/main.qml and drop this field. -->
+        <!-- Optional fallback Client ID. The shipped ID is hardcoded in
+             ui/main.qml (embeddedClientId); no settings field exposes this,
+             so it normally stays empty. -->
         <entry name="clientId" type="String">
             <default></default>
         </entry>
