@@ -314,7 +314,11 @@ PlasmoidItem {
 
             RowLayout {
                 id: chipRow
-                anchors.centerIn: parent
+                // Left-align (not centerIn) so every entry's dot/name share a
+                // common left edge when chips are stretched to full width.
+                anchors.left: parent.left
+                anchors.leftMargin: Kirigami.Units.smallSpacing
+                anchors.verticalCenter: parent.verticalCenter
                 spacing: Kirigami.Units.smallSpacing
 
                 Rectangle { // "live" dot
