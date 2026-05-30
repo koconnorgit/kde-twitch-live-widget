@@ -1,114 +1,153 @@
-# Twitch Live — KDE Plasma 6 widget
+# Twitch Live
 
-A tiny overlay widget for KDE Plasma 6 (Wayland/X11) that watches a list of
-Twitch channels and shows which ones are **live right now**. Click a name to
-open the channel in your browser.
+A tiny KDE Plasma 6 desktop widget that shows which of your favourite Twitch
+streamers are **live right now**. Click a name to open their channel in your
+browser.
+
+It's frameless and transparent, so it sits cleanly on your desktop — when
+nobody's live it simply disappears.
+
+---
 
 ## Features
 
-- Monitors any number of channels via the official Twitch **Helix API**
-- **No client secret** — uses the OAuth **Device Code flow** (a public client),
-  so the widget is safe to publish. Users link with a one-time browser approval.
-- Click a live streamer to open `https://twitch.tv/<channel>`
-- Options: **font size**, **horizontal or vertical expansion**, and the
-  **channels** to monitor
-- Configurable poll interval (default 60 s)
-- Panel mode shows an icon with a live-count badge; desktop mode shows the list
+- Watches any number of Twitch channels and shows who's currently live
+- **Click a streamer's name** to open `twitch.tv/<channel>`
+- Frameless and transparent — no window chrome, invisible when nobody is live
+- Expand **horizontally** (a row) or **vertically** (a stack)
+- Pin the text to any **edge or corner** of the widget (great for a slim strip
+  along a screen edge)
+- Adjustable **font face, size, and colour**
+- Configurable check interval and a hover delay before the controls appear
+- Sign in once with your own Twitch account — no setup, no API keys to manage
 
-## How auth works (and why it's publish-safe)
+---
 
-Twitch requires a **Client ID** on every API call, so *someone* registers one
-app — but only the **publisher**, once. End users never register anything.
+## Requirements
 
-This widget uses the **Device Code Grant flow**:
+- **KDE Plasma 6** (Wayland or X11)
+- `kpackagetool6` — ships with Plasma (in `plasma-workspace`); used by the
+  installer
+- A Twitch account (used only to sign in)
 
-1. The widget asks Twitch for a short code.
-2. You approve it in a browser (logging into *your own* Twitch account).
-3. The widget gets a user token + refresh token. The refresh token is
-   one-time-use and renews automatically **without any client secret** (public
-   clients are allowed to refresh secret-free). It expires after ~30 days idle;
-   open the widget within any 30-day window and it keeps working.
+---
 
-Because **no secret is ever shipped**, the source is safe to publish. The only
-embedded value is the Client ID, which is public by design.
-
-## 1. Register the app (publisher, one time, ~2 min)
-
-1. Go to <https://dev.twitch.tv/console/apps> and log in.
-2. **Register Your Application**:
-   - **Name**: anything (e.g. `my-live-widget`)
-   - **OAuth Redirect URLs**: `http://localhost`
-   - **Category**: *Application Integration*
-   - **Client Type**: **Public**  ← important; no secret is generated
-3. Copy the **Client ID**.
-
-To distribute the widget to others, hardcode that Client ID in
-`contents/ui/main.qml`:
-
-```qml
-readonly property string embeddedClientId: "your_client_id_here"
-```
-
-(and you can then remove the Client ID field from the settings form). For your
-own use you can skip that and just paste the Client ID into the widget's
-settings instead.
-
-## 2. Install
+## Install
 
 ```sh
+git clone https://github.com/koconnorgit/kde-twitch-live-widget.git
+cd kde-twitch-live-widget
 ./install.sh
 ```
 
-Installs into `~/.local/share/plasma/plasmoids/com.kevin.twitchlive` via
-`kpackagetool6`. Then **Add Widgets… → "Twitch Live"** and drop it on your
-desktop or panel. If it doesn't appear (or you upgraded), restart the shell:
+Then **right-click your desktop → Add Widgets…**, search for **Twitch Live**,
+and drag it onto your desktop. If it doesn't show up right away, restart the
+shell:
 
 ```sh
-kquitapp6 plasmashell && (kstart plasmashell >/dev/null 2>&1 &)
+kquitapp6 plasmashell && kstart plasmashell
 ```
 
-## 3. Configure & link
+To update later, `git pull` and run `./install.sh` again.
 
-End users never enter a Client ID — it's baked into the widget. They just:
+---
 
-1. Click **Link Twitch account** in the widget → approve on the Twitch page that
-   opens (or go to `twitch.tv/activate` and type the code shown).
-2. Right-click → **Configure Twitch Live…** to set the **channels** to monitor
-   (one login per line; use the name from the channel URL, e.g. `shroud`), and
-   pick **horizontal/vertical** expansion and a **font size**.
+## First run: sign in
 
-After linking it polls automatically and re-checks immediately when you change
-channels.
+1. Click **Link Twitch account** on the widget.
+2. Your browser opens a Twitch page — approve the request (you may need to log
+   in to Twitch first). You can also go to `twitch.tv/activate` and type the
+   code the widget shows.
+3. That's it — the widget starts showing who's live.
 
-## Notes & limitations
+The sign-in is **read-only**: it can only see public "who's live" information.
+It can't post, change anything on your account, or read your messages. You can
+revoke it any time at <https://www.twitch.tv/settings/connections>.
 
-- **No secret on disk.** Only the access/refresh tokens and the public Client ID
-  are stored in the plasmoid config
-  (`~/.config/plasma-org.kde.plasma.desktop-appletsrc`). The tokens grant only
-  public read access (who's live) — no posting, no stream key, no account
-  settings. Revoke anytime at <https://www.twitch.tv/settings/connections>.
-- **Shared rate limit.** All users of a published build share the app's
-  per-Client-ID Helix rate budget (~800 points/min). Fine for live polling.
-- **Wayland always-on-top.** A desktop plasmoid sits on the desktop layer. For
-  a floating-above-windows feel, use panel mode (with auto-hide) or a KWin
-  window rule; Wayland restricts true overlays.
-- Twitch's `/streams` endpoint only returns channels that are currently live,
-  and accepts up to 100 logins per request.
+---
 
-## Uninstall
+## Configure
+
+Right-click the widget → **Configure Twitch Live…**:
+
+- **Channels** — the streamers to watch, one per line. Use the name from the
+  channel's URL (e.g. `shroud`), not the fancy display name.
+- **Expand** — Horizontally or Vertically.
+- **Horizontal / Vertical align** — pin the text to a side or corner.
+- **Font face / size / colour** — match your desktop. Leave colour on the
+  theme default to follow your Plasma colours.
+- **Show controls after** — how long to hover before the refresh/settings
+  buttons fade in (set to *Immediately* to always show them on hover).
+- **Check every** — how often to refresh (default 60 s).
+- **Account** — sign in or sign out of Twitch.
+
+### Tip: a slim strip along a screen edge
+
+Stretch the widget across the bottom of your screen, set **Expand: Horizontally**
+and **Vertical align: Bottom**, and the live names will hug the bottom edge.
+Desktop widgets have a minimum height in Plasma, but the alignment lets the text
+sit exactly where you want regardless.
+
+---
+
+## Troubleshooting
+
+- **Nothing shows / "Nobody's live"** — that's normal when none of your channels
+  are streaming. Hover the widget to see the status and the refresh button.
+- **Widget doesn't appear in "Add Widgets…"** — restart Plasma:
+  `kquitapp6 plasmashell && kstart plasmashell`.
+- **Stuck asking to sign in** — click **Link Twitch account** again; if your
+  authorization expired, just re-approve in the browser.
+- **Can't find the widget when nobody's live** — it's transparent by design.
+  Hover where you placed it (controls appear) or right-click that spot.
+
+---
+
+## Remove
 
 ```sh
-kpackagetool6 --type Plasma/Applet --remove com.kevin.twitchlive
+./uninstall.sh
 ```
 
-## Files
+or `kpackagetool6 --type Plasma/Applet --remove io.github.koconnorgit.twitchlive`,
+then remove the widget from your desktop if it's still there.
+
+---
+
+## For developers / forking
+
+Twitch requires every app to send a **Client ID**. This widget ships with one
+embedded, so end users never deal with it. If you fork and publish your own
+build, register your own app and swap the ID in:
+
+1. Create an app at <https://dev.twitch.tv/console/apps>:
+   - **OAuth Redirect URL**: `http://localhost`
+   - **Client Type**: **Public** (no client secret is used or shipped)
+2. Put its Client ID in `package/contents/ui/main.qml`:
+   ```qml
+   readonly property string embeddedClientId: "your_client_id_here"
+   ```
+
+Sign-in uses the OAuth **Device Code** flow, which lets a public client refresh
+tokens without a secret — so nothing sensitive is ever stored in the repo or on
+disk. Note that all installs of a given build share that app's Twitch API rate
+limit.
+
+Project layout:
 
 ```
 package/
-  metadata.json                 plasmoid manifest
+  metadata.json                 widget manifest
   contents/
-    config/main.xml             config schema (+ token storage)
+    config/main.xml             settings schema
     config/config.qml           settings categories
-    config/configGeneral.qml    settings form
-    ui/main.qml                 widget + device-flow auth + Twitch polling
+    ui/configGeneral.qml        settings form
+    ui/main.qml                 the widget + Twitch logic
+install.sh / uninstall.sh       per-user (un)installers
 ```
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

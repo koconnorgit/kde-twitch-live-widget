@@ -1,24 +1,31 @@
 #!/bin/sh
-# Install (or upgrade) the Twitch Live plasmoid for the current user.
+# Install or upgrade the Twitch Live widget for the current user.
+# Works on any KDE Plasma 6 system; no paths are hardcoded.
 set -e
 
-PKG="$(cd "$(dirname "$0")" && pwd)/package"
+PLUGIN_ID="io.github.koconnorgit.twitchlive"
+PKG_DIR="$(cd "$(dirname "$0")" && pwd)/package"
 
 if ! command -v kpackagetool6 >/dev/null 2>&1; then
-    echo "kpackagetool6 not found. Install plasma-sdk / plasma-workspace first." >&2
+    echo "Error: 'kpackagetool6' not found." >&2
+    echo "Install your distribution's Plasma packages (e.g. plasma-workspace) and retry." >&2
     exit 1
 fi
 
-if kpackagetool6 --type Plasma/Applet --show com.kevin.twitchlive >/dev/null 2>&1; then
-    echo "Upgrading existing install…"
-    kpackagetool6 --type Plasma/Applet --upgrade "$PKG"
+if [ ! -f "$PKG_DIR/metadata.json" ]; then
+    echo "Error: widget package not found at $PKG_DIR" >&2
+    exit 1
+fi
+
+if kpackagetool6 --type Plasma/Applet --show "$PLUGIN_ID" >/dev/null 2>&1; then
+    echo "Upgrading $PLUGIN_ID …"
+    kpackagetool6 --type Plasma/Applet --upgrade "$PKG_DIR"
 else
-    echo "Installing…"
-    kpackagetool6 --type Plasma/Applet --install "$PKG"
+    echo "Installing $PLUGIN_ID …"
+    kpackagetool6 --type Plasma/Applet --install "$PKG_DIR"
 fi
 
 echo
-echo "Done. Add it via 'Add Widgets…' → search \"Twitch Live\","
-echo "or drop it on the desktop/panel."
-echo "If it doesn't show up, restart the shell:"
-echo "    kquitapp6 plasmashell && (kstart plasmashell >/dev/null 2>&1 &)"
+echo "Done. Add it via 'Add Widgets…' and search for \"Twitch Live\"."
+echo "If it doesn't appear yet, restart Plasma:"
+echo "    kquitapp6 plasmashell && kstart plasmashell"

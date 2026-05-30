@@ -3,13 +3,13 @@
         "Authors": [
             {
                 "Email": "86918868+koconnorgit@users.noreply.github.com",
-                "Name": "Kevin"
+                "Name": "koconnorgit"
             }
         ],
         "Category": "Online Services",
         "Description": "Shows which of your favorite Twitch streamers are live and lets you jump to their channel.",
         "Icon": "live-stream",
-        "Id": "com.kevin.twitchlive",
+        "Id": "io.github.koconnorgit.twitchlive",
         "License": "MIT",
         "Name": "Twitch Live",
         "Version": "1.0"
