@@ -43,6 +43,120 @@ PlasmoidItem {
     readonly property color normalColor: fontColor ? fontColor : Kirigami.Theme.textColor
     readonly property color hoverColor: Kirigami.Theme.highlightedTextColor
 
+    // ------------------------------------------------------------------
+    // Border / background (opt-in framing for the widget and/or each chip).
+    // Disabled by default → the widget stays frameless unless turned on.
+    // *CornerStyle: 0 square, 1 rounded.  *FillMode: 0 single, 1 gradient, 2 random.
+    // ------------------------------------------------------------------
+    readonly property bool   widgetFrameEnabled: Plasmoid.configuration.widgetFrameEnabled
+    readonly property int    widgetBorderWidth:  Plasmoid.configuration.widgetBorderWidth
+    readonly property int    widgetCornerStyle:  Plasmoid.configuration.widgetCornerStyle
+    readonly property int    widgetCornerRadius: Plasmoid.configuration.widgetCornerRadius
+    readonly property string widgetBorderColor:  Plasmoid.configuration.widgetBorderColor // "" = theme highlight
+    readonly property real   widgetFillOpacity:  Plasmoid.configuration.widgetFillOpacity
+    readonly property int    widgetFillMode:     Plasmoid.configuration.widgetFillMode
+    readonly property string widgetFillColors:   Plasmoid.configuration.widgetFillColors
+
+    readonly property bool   chipFrameEnabled:   Plasmoid.configuration.chipFrameEnabled
+    readonly property int    chipBorderWidth:    Plasmoid.configuration.chipBorderWidth
+    readonly property int    chipCornerStyle:    Plasmoid.configuration.chipCornerStyle
+    readonly property int    chipCornerRadius:   Plasmoid.configuration.chipCornerRadius
+    readonly property string chipBorderColor:    Plasmoid.configuration.chipBorderColor
+    readonly property real   chipFillOpacity:    Plasmoid.configuration.chipFillOpacity
+    readonly property int    chipFillMode:       Plasmoid.configuration.chipFillMode
+    readonly property string chipFillColors:     Plasmoid.configuration.chipFillColors
+
+    // Breathing room so a widget frame doesn't crowd the text.
+    readonly property int framePadding: widgetFrameEnabled
+        ? (Kirigami.Units.smallSpacing + Math.max(0, widgetBorderWidth)) : 0
+
+    // Random fill colors. Per-streamer colors are keyed by login and only change
+    // when a channel newly comes online (a login that goes away and comes back is
+    // treated as new and re-rolls). The widget-level random color likewise
+    // re-rolls whenever a new channel appears.
+    property var streamColors: ({})
+    property color widgetRandomColor: "transparent"
+
+    // Gradients are pre-built and only rebuilt when their colors/opacity change —
+    // not on every hover or poll.
+    readonly property var widgetGradient: (widgetFrameEnabled && widgetFillMode === 1)
+        ? makeGradient(widgetFillColors, widgetFillOpacity, false) : null
+    readonly property var chipGradient: (chipFrameEnabled && chipFillMode === 1)
+        ? makeGradient(chipFillColors, chipFillOpacity, true) : null
+
+    function parseColorList(s) {
+        return (s || "").split(/[\s,]+/)
+            .map(function (x) { return x.trim(); })
+            .filter(function (x) { return x.length > 0; });
+    }
+    // Return `c` (a color value or "#rgb"/"#rrggbb"/"#aarrggbb" string) at alpha
+    // `a`. Pure (no shared state) — using a shared scratch property here caused a
+    // binding loop that froze the colors until the delegate was recreated.
+    function withAlpha(c, a) {
+        if (c !== undefined && c !== null && c.r !== undefined)
+            return Qt.rgba(c.r, c.g, c.b, a);     // color value type (0..1 components)
+        var s = ("" + c).trim();
+        if (s.charAt(0) === "#") {
+            var h = s.substring(1), r, g, b;
+            if (h.length === 3) {
+                r = parseInt(h.charAt(0) + h.charAt(0), 16);
+                g = parseInt(h.charAt(1) + h.charAt(1), 16);
+                b = parseInt(h.charAt(2) + h.charAt(2), 16);
+            } else if (h.length === 8) {          // #aarrggbb
+                r = parseInt(h.substr(2, 2), 16);
+                g = parseInt(h.substr(4, 2), 16);
+                b = parseInt(h.substr(6, 2), 16);
+            } else {                              // #rrggbb
+                r = parseInt(h.substr(0, 2), 16);
+                g = parseInt(h.substr(2, 2), 16);
+                b = parseInt(h.substr(4, 2), 16);
+            }
+            return Qt.rgba(r / 255, g / 255, b / 255, a);
+        }
+        return Qt.rgba(0, 0, 0, a);               // unknown → translucent (shouldn't happen)
+    }
+    function randomHue() { return Qt.hsla(Math.random(), 0.55, 0.55, 1.0); }
+    // Pick from the configured list if any, otherwise a fully random hue.
+    function pickFill(csv) {
+        var list = parseColorList(csv);
+        if (list.length > 0) return list[Math.floor(Math.random() * list.length)];
+        return randomHue();
+    }
+    function makeGradient(csv, alpha, horizontal) {
+        var list = parseColorList(csv);
+        if (list.length === 0) list = [Kirigami.Theme.backgroundColor.toString()];
+        if (list.length === 1) list.push(list[0]);
+        var stops = "";
+        for (var i = 0; i < list.length; i++) {
+            var pos = i / (list.length - 1);
+            stops += 'GradientStop { position: ' + pos
+                  + '; color: "' + withAlpha(list[i], alpha).toString() + '" }\n';
+        }
+        return Qt.createQmlObject(
+            'import QtQuick\nGradient {\norientation: Gradient.'
+            + (horizontal ? 'Horizontal' : 'Vertical') + '\n' + stops + '}',
+            root, "dynamicGradient");
+    }
+    // Keep the per-streamer (and widget) random colors in step with who's live.
+    function reconcileStreamColors() {
+        var prev = root.streamColors;
+        var next = {};
+        var grew = false;
+        for (var i = 0; i < root.liveStreams.length; i++) {
+            var login = root.liveStreams[i].login;
+            if (prev[login] !== undefined) {
+                next[login] = prev[login];          // still live → keep its color
+            } else {
+                next[login] = pickFill(root.chipFillColors).toString(); // newly live
+                grew = true;
+            }
+        }
+        root.streamColors = next;                    // drops offline logins (re-roll later)
+        if (grew && root.widgetFillMode === 2)
+            root.widgetRandomColor = pickFill(root.widgetFillColors);
+    }
+    onLiveStreamsChanged: reconcileStreamColors()
+
     // No frame / panel behind the widget — just the content.
     Plasmoid.backgroundHints: PlasmaCore.Types.NoBackground
     preferredRepresentation: fullRepresentation
@@ -306,8 +420,28 @@ PlasmoidItem {
 
         Rectangle {
             id: chip
-            radius: Kirigami.Units.smallSpacing
-            color: hover.hovered ? Kirigami.Theme.highlightColor : "transparent"
+            radius: root.chipFrameEnabled
+                ? (root.chipCornerStyle === 1 ? root.chipCornerRadius : 0)
+                : Kirigami.Units.smallSpacing
+            border.width: root.chipFrameEnabled ? Math.max(0, root.chipBorderWidth) : 0
+            border.color: root.chipBorderColor
+                ? root.chipBorderColor : Kirigami.Theme.highlightColor
+            color: {
+                if (hover.hovered) return Kirigami.Theme.highlightColor;
+                if (!root.chipFrameEnabled) return "transparent";
+                if (root.chipFillMode === 1) return "transparent"; // gradient set below
+                if (root.chipFillMode === 2) {                     // random per streamer
+                    var rc = root.streamColors[modelData.login];
+                    return root.withAlpha(rc ? rc : Kirigami.Theme.backgroundColor,
+                                          root.chipFillOpacity);
+                }
+                var list = root.parseColorList(root.chipFillColors); // single → first color
+                return root.withAlpha(list.length ? list[0]
+                    : Kirigami.Theme.backgroundColor, root.chipFillOpacity);
+            }
+            // Keep the hover highlight readable by dropping the gradient while hovered.
+            gradient: (root.chipFrameEnabled && root.chipFillMode === 1 && !hover.hovered)
+                ? root.chipGradient : null
             implicitWidth: chipRow.implicitWidth + Kirigami.Units.largeSpacing
             implicitHeight: chipRow.implicitHeight + Kirigami.Units.smallSpacing
             Layout.fillWidth: root.orientation === 1
@@ -406,9 +540,31 @@ PlasmoidItem {
         // Size to the content so a horizontal layout can be as thin as the text
         // (lets you align it flush to a screen edge). No tall minimum height.
         Layout.minimumWidth: Kirigami.Units.gridUnit * 3
-        Layout.minimumHeight: contentCol.implicitHeight
-        implicitWidth: contentCol.implicitWidth
-        implicitHeight: contentCol.implicitHeight
+        Layout.minimumHeight: contentCol.implicitHeight + 2 * root.framePadding
+        implicitWidth: contentCol.implicitWidth + 2 * root.framePadding
+        implicitHeight: contentCol.implicitHeight + 2 * root.framePadding
+
+        // Optional widget-level border + translucent background (opt-in).
+        Rectangle {
+            id: widgetBg
+            z: -1
+            visible: root.widgetFrameEnabled
+            anchors.fill: contentCol
+            anchors.margins: -root.framePadding
+            radius: root.widgetCornerStyle === 1 ? root.widgetCornerRadius : 0
+            border.width: Math.max(0, root.widgetBorderWidth)
+            border.color: root.widgetBorderColor
+                ? root.widgetBorderColor : Kirigami.Theme.highlightColor
+            color: {
+                if (root.widgetFillMode === 1) return "transparent"; // gradient set below
+                if (root.widgetFillMode === 2)
+                    return root.withAlpha(root.widgetRandomColor, root.widgetFillOpacity);
+                var list = root.parseColorList(root.widgetFillColors);
+                return root.withAlpha(list.length ? list[0]
+                    : Kirigami.Theme.backgroundColor, root.widgetFillOpacity);
+            }
+            gradient: root.widgetGradient
+        }
 
         // Controls appear only after the pointer dwells for hoverDelay ms,
         // so sweeping the cursor across a wide strip doesn't flash them.
@@ -437,11 +593,11 @@ PlasmoidItem {
             // Pin the content block to the chosen edge/corner of the widget box,
             // so text can hug a side regardless of the box's forced size.
             // (Positioned with x/y to avoid conflicting-anchor combinations.)
-            x: root.hAlign === 0 ? 0
-               : root.hAlign === 2 ? (parent.width - width)
+            x: root.hAlign === 0 ? root.framePadding
+               : root.hAlign === 2 ? (parent.width - width - root.framePadding)
                : (parent.width - width) / 2
-            y: root.vAlign === 0 ? 0
-               : root.vAlign === 2 ? (parent.height - height)
+            y: root.vAlign === 0 ? root.framePadding
+               : root.vAlign === 2 ? (parent.height - height - root.framePadding)
                : (parent.height - height) / 2
             spacing: Kirigami.Units.smallSpacing
 

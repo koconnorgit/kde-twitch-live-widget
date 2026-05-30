@@ -26,6 +26,9 @@ nobody's live it simply disappears.
 - Pin the text to any **edge or corner** of the widget (great for a slim strip
   along a screen edge)
 - Adjustable **font face, size, and colour**
+- Optional **border + translucent background** — around the whole widget and/or
+  each streamer, with configurable width, square or rounded corners (adjustable
+  radius), opacity, and a single colour, a gradient, or random colours
 - Configurable check interval and a hover delay before the controls appear
 - Sign in once with your own Twitch account — no setup, no API keys to manage
 
@@ -87,6 +90,17 @@ Right-click the widget → **Configure Twitch Live…**:
 - **Show controls after** — how long to hover before the refresh/settings
   buttons fade in (set to *Immediately* to always show them on hover).
 - **Check every** — how often to refresh (default 60 s).
+- **Widget border / background** and **Per-streamer border / background** — two
+  independent, opt-in frames (one around the whole widget, one around each live
+  streamer). Each has its own:
+  - **Border** — width (0 = no line) and colour
+  - **Corners** — Square or Rounded, with an adjustable radius
+  - **Fill** — opacity, plus a **fill mode**:
+    - *Single* — the first colour in the list
+    - *Gradient* — blends all the colours in the list
+    - *Random* — a colour per streamer, re-rolled whenever a channel newly comes
+      online; drawn from your colour list, or a random hue if the list is empty
+  - **Fill colours** — add/remove swatches for the list above
 - **Account** — sign in or sign out of Twitch.
 
 ### Tip: a slim strip along a screen edge
@@ -150,6 +164,7 @@ package/
     config/main.xml             settings schema
     config/config.qml           settings categories
     ui/configGeneral.qml        settings form
+    ui/FrameSettings.qml        reusable border/background settings group
     ui/main.qml                 the widget + Twitch logic
 install.sh / uninstall.sh       per-user (un)installers
 ```

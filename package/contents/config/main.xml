@@ -84,5 +84,72 @@
         <entry name="tokenExpiry" type="Double">
             <default>0</default>
         </entry>
+
+        <!-- ============================================================
+             Border / background framing (all opt-in; disabled by default
+             so the widget stays frameless unless you turn this on).
+
+             Two independent scopes share the same set of knobs:
+               widget* → one frame around the whole widget content
+               chip*   → a frame around each live-streamer entry
+
+             *CornerStyle: 0 = square, 1 = rounded (radius from *CornerRadius)
+             *FillMode:    0 = single color, 1 = gradient, 2 = random
+             *FillColors:  comma/space separated hex list; single uses the
+                           first, gradient blends all, random picks among them
+                           (or a random hue when the list is empty)
+             ============================================================ -->
+
+        <!-- Widget-level frame -->
+        <entry name="widgetFrameEnabled" type="Bool">
+            <default>false</default>
+        </entry>
+        <entry name="widgetBorderWidth" type="Int">
+            <default>1</default>
+        </entry>
+        <entry name="widgetCornerStyle" type="Int">
+            <default>1</default>
+        </entry>
+        <entry name="widgetCornerRadius" type="Int">
+            <default>8</default>
+        </entry>
+        <entry name="widgetBorderColor" type="String">
+            <default></default>
+        </entry>
+        <entry name="widgetFillOpacity" type="Double">
+            <default>0.35</default>
+        </entry>
+        <entry name="widgetFillMode" type="Int">
+            <default>0</default>
+        </entry>
+        <entry name="widgetFillColors" type="String">
+            <default></default>
+        </entry>
+
+        <!-- Per-streamer chip frame -->
+        <entry name="chipFrameEnabled" type="Bool">
+            <default>false</default>
+        </entry>
+        <entry name="chipBorderWidth" type="Int">
+            <default>1</default>
+        </entry>
+        <entry name="chipCornerStyle" type="Int">
+            <default>1</default>
+        </entry>
+        <entry name="chipCornerRadius" type="Int">
+            <default>8</default>
+        </entry>
+        <entry name="chipBorderColor" type="String">
+            <default></default>
+        </entry>
+        <entry name="chipFillOpacity" type="Double">
+            <default>0.35</default>
+        </entry>
+        <entry name="chipFillMode" type="Int">
+            <default>0</default>
+        </entry>
+        <entry name="chipFillColors" type="String">
+            <default></default>
+        </entry>
     </group>
 </kcfg>
