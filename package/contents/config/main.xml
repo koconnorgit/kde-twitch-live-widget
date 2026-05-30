@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+    <kcfgfile name=""/>
+    <group name="General">
+        <!-- Twitch application Client ID (PUBLIC client type).
+             Only the publisher needs to set this once; end users never do.
+             For a public release you can hardcode it in ui/main.qml and drop this field. -->
+        <entry name="clientId" type="String">
+            <default></default>
+        </entry>
+
+        <!-- Whitespace/comma separated list of channel logins to monitor -->
+        <entry name="channels" type="String">
+            <default></default>
+        </entry>
+
+        <!-- Seconds between checks -->
+        <entry name="pollInterval" type="Int">
+            <default>60</default>
+        </entry>
+
+        <!-- Pixel size of the streamer name labels -->
+        <entry name="fontSize" type="Int">
+            <default>14</default>
+        </entry>
+
+        <!-- 0 = horizontal expansion, 1 = vertical expansion -->
+        <entry name="orientation" type="Int">
+            <default>1</default>
+        </entry>
+
+        <!-- Empty string = use the current Plasma theme's text color -->
+        <entry name="fontColor" type="String">
+            <default></default>
+        </entry>
+
+        <!-- Empty string = use the default UI font family -->
+        <entry name="fontFamily" type="String">
+            <default></default>
+        </entry>
+
+        <!-- Where the content sits within the (possibly larger) widget box.
+             hAlign: 0 = left, 1 = center, 2 = right
+             vAlign: 0 = top,  1 = center, 2 = bottom -->
+        <entry name="hAlign" type="Int">
+            <default>0</default>
+        </entry>
+        <entry name="vAlign" type="Int">
+            <default>0</default>
+        </entry>
+
+        <!-- How long (ms) the pointer must dwell before the hover controls
+             (refresh/configure) appear. 0 = show immediately. -->
+        <entry name="hoverDelay" type="Int">
+            <default>800</default>
+        </entry>
+
+        <!-- Display-only mirror of link state, kept in sync by the widget so the
+             settings page can show Link vs Unlink without touching the tokens. -->
+        <entry name="linked" type="Bool">
+            <default>false</default>
+        </entry>
+
+        <!-- Transient command flags: set by the settings Link/Unlink buttons,
+             consumed (and reset) by the widget so the form never round-trips
+             the live tokens. -->
+        <entry name="linkRequested" type="Bool">
+            <default>false</default>
+        </entry>
+        <entry name="unlinkRequested" type="Bool">
+            <default>false</default>
+        </entry>
+
+        <!-- OAuth state from the device code flow (no client secret involved) -->
+        <entry name="cachedToken" type="String">
+            <default></default>
+        </entry>
+        <entry name="refreshToken" type="String">
+            <default></default>
+        </entry>
+        <entry name="tokenExpiry" type="Double">
+            <default>0</default>
+        </entry>
+    </group>
+</kcfg>
