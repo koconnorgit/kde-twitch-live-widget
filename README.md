@@ -7,13 +7,9 @@ browser.
 It's frameless and transparent, so it sits cleanly on your desktop — when
 nobody's live it simply disappears.
 
-**Vertical layout** — a list that expands downward:
+It expands either **vertically** (a list) or **horizontally** (a slim strip):
 
-<img src="assets/screenshot-vertical.png" alt="Twitch Live, vertical layout" width="300">
-
-**Horizontal layout** — a slim strip, e.g. along a screen edge:
-
-<img src="assets/screenshot-horizontal.png" alt="Twitch Live, horizontal layout" width="480">
+<img src="assets/preview.png" alt="Twitch Live widget preview" width="480">
 
 ---
 
