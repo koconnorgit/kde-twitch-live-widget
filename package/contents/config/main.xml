@@ -12,8 +12,13 @@
             <default></default>
         </entry>
 
-        <!-- Whitespace/comma separated list of channel logins to monitor -->
+        <!-- Whitespace/comma separated list of Twitch channel logins to monitor -->
         <entry name="channels" type="String">
+            <default></default>
+        </entry>
+
+        <!-- Whitespace/comma separated list of Kick channel slugs to monitor -->
+        <entry name="kickChannels" type="String">
             <default></default>
         </entry>
 
@@ -58,9 +63,12 @@
             <default>800</default>
         </entry>
 
-        <!-- Display-only mirror of link state, kept in sync by the widget so the
+        <!-- Display-only mirrors of link state, kept in sync by the widget so the
              settings page can show Link vs Unlink without touching the tokens. -->
         <entry name="linked" type="Bool">
+            <default>false</default>
+        </entry>
+        <entry name="kickLinked" type="Bool">
             <default>false</default>
         </entry>
 
@@ -73,8 +81,14 @@
         <entry name="unlinkRequested" type="Bool">
             <default>false</default>
         </entry>
+        <entry name="kickConnectRequested" type="Bool">
+            <default>false</default>
+        </entry>
+        <entry name="kickDisconnectRequested" type="Bool">
+            <default>false</default>
+        </entry>
 
-        <!-- OAuth state from the device code flow (no client secret involved) -->
+        <!-- Twitch OAuth state from the device code flow (no client secret involved) -->
         <entry name="cachedToken" type="String">
             <default></default>
         </entry>
@@ -82,6 +96,24 @@
             <default></default>
         </entry>
         <entry name="tokenExpiry" type="Double">
+            <default>0</default>
+        </entry>
+
+        <!-- Kick OAuth: unlike Twitch, Kick requires a client secret, so each
+             user registers their own app at dev.kick.com and enters its
+             credentials here. The app access token (client_credentials grant,
+             no refresh token) reads only public "who's live" data and is
+             re-requested from the credentials whenever it expires. -->
+        <entry name="kickClientId" type="String">
+            <default></default>
+        </entry>
+        <entry name="kickClientSecret" type="String">
+            <default></default>
+        </entry>
+        <entry name="kickToken" type="String">
+            <default></default>
+        </entry>
+        <entry name="kickTokenExpiry" type="Double">
             <default>0</default>
         </entry>
 

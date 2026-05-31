@@ -10,8 +10,10 @@ KCM.SimpleKCM {
     id: root
 
     // cfg_ properties bind the form to config/main.xml entries.
-    // (Client ID is baked into the widget; users just link from the widget.)
+    // (Twitch Client ID is baked into the widget; users just link. Kick needs
+    // their own app credentials, handled by the Connect button further down.)
     property alias cfg_channels: channelsField.text
+    property alias cfg_kickChannels: kickChannelsField.text
     property alias cfg_pollInterval: pollSpin.value
     property alias cfg_fontSize: fontSpin.value
     property alias cfg_orientation: orientationCombo.currentIndex
@@ -49,6 +51,16 @@ KCM.SimpleKCM {
 
     readonly property var fontFamilies: Qt.fontFamilies()
 
+    // Kick app names must be unique on the platform, so the suggested name gets
+    // a random hex suffix. n = number of hex digits.
+    function randomHex(n) {
+        var chars = "0123456789abcdef";
+        var s = "";
+        for (var i = 0; i < n; i++)
+            s += chars.charAt(Math.floor(Math.random() * 16));
+        return s;
+    }
+
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
 
@@ -62,11 +74,20 @@ KCM.SimpleKCM {
 
             QQC2.TextArea {
                 id: channelsField
-                Kirigami.FormData.label: i18n("Monitor:")
+                Kirigami.FormData.label: i18n("Twitch channels:")
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 18
-                Layout.minimumHeight: Kirigami.Units.gridUnit * 6
+                Layout.minimumHeight: Kirigami.Units.gridUnit * 5
                 wrapMode: TextEdit.WrapAnywhere
                 placeholderText: i18n("e.g.\nshroud\nxqc\nsummit1g")
+            }
+
+            QQC2.TextArea {
+                id: kickChannelsField
+                Kirigami.FormData.label: i18n("Kick channels:")
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 18
+                Layout.minimumHeight: Kirigami.Units.gridUnit * 5
+                wrapMode: TextEdit.WrapAnywhere
+                placeholderText: i18n("e.g.\nxqc\ntrainwreckstv")
             }
 
             QQC2.Label {
@@ -74,7 +95,7 @@ KCM.SimpleKCM {
                 wrapMode: Text.WordWrap
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
-                text: i18n("One channel login per line (or separated by spaces/commas). Use the name from the channel URL, not the display name.")
+                text: i18n("One channel name per line (or separated by spaces/commas). Use the name from the channel URL, not the display name. Twitch channels show once you link below; Kick channels need a connected Kick account (set up below).")
             }
 
             Kirigami.Separator {
@@ -219,6 +240,126 @@ KCM.SimpleKCM {
                 text: Plasmoid.configuration.linked
                     ? i18n("Unlinking clears the saved Twitch authorization. You can re-link any time.")
                     : i18n("Links your Twitch account; approve the request in the browser window that opens.")
+            }
+
+            // ----------------------------------------------------------------
+            // Kick: unlike Twitch, Kick has no shippable public client, so each
+            // user registers their own app and pastes its Client ID + Secret.
+            // These are written straight to the live config by the Connect
+            // button (not via cfg_ aliases), mirroring how the tokens are kept
+            // out of the Apply cycle.
+            // ----------------------------------------------------------------
+            Kirigami.Separator {
+                Kirigami.FormData.label: i18n("Kick")
+                Kirigami.FormData.isSection: true
+            }
+
+            QQC2.Label {
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                wrapMode: Text.WordWrap
+                visible: !Plasmoid.configuration.kickLinked
+                text: i18n("Kick needs its own free app, which you create once:\n\n1. Click “Open Kick developer settings” below and sign in.\n2. Create a new app, using the recommended name and Redirect URI below (use Copy, then paste). The name has no spaces and a random suffix because Kick app names must be unique. The Redirect URI is only needed if Kick asks for one — the widget never uses it.\n3. Copy the app's Client ID and Client Secret into the fields below.\n4. Click “Connect Kick account”.")
+            }
+
+            QQC2.Button {
+                Kirigami.FormData.label: i18n("Register:")
+                visible: !Plasmoid.configuration.kickLinked
+                text: i18n("Open Kick developer settings")
+                icon.name: "internet-services"
+                onClicked: Qt.openUrlExternally("https://kick.com/settings/developer")
+            }
+
+            // Recommended values for Kick's app form, shown read-only with a Copy
+            // button so they can be pasted into Kick without retyping. (We can't
+            // pre-fill the Client ID/Secret — Kick generates those per app.)
+            RowLayout {
+                Kirigami.FormData.label: i18n("App name (must be unique):")
+                visible: !Plasmoid.configuration.kickLinked
+                QQC2.TextField {
+                    id: kickAppNameField
+                    readOnly: true
+                    // No spaces, and unique on Kick → fixed prefix + random hex.
+                    // Pure hex (no separator) keeps it safely alphanumeric.
+                    Component.onCompleted: text = "kdewidget" + root.randomHex(32)
+                    Layout.minimumWidth: Kirigami.Units.gridUnit * 18
+                }
+                QQC2.Button {
+                    text: i18n("Copy")
+                    icon.name: "edit-copy"
+                    onClicked: { kickAppNameField.selectAll(); kickAppNameField.copy(); kickAppNameField.deselect(); }
+                }
+            }
+
+            RowLayout {
+                Kirigami.FormData.label: i18n("Redirect URI:")
+                visible: !Plasmoid.configuration.kickLinked
+                QQC2.TextField {
+                    id: kickRedirectField
+                    readOnly: true
+                    text: "http://localhost"
+                    Layout.minimumWidth: Kirigami.Units.gridUnit * 14
+                }
+                QQC2.Button {
+                    text: i18n("Copy")
+                    icon.name: "edit-copy"
+                    onClicked: { kickRedirectField.selectAll(); kickRedirectField.copy(); kickRedirectField.deselect(); }
+                }
+            }
+
+            QQC2.TextField {
+                id: kickIdField
+                Kirigami.FormData.label: i18n("Client ID:")
+                visible: !Plasmoid.configuration.kickLinked
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 18
+                // Seed from the live config so a half-entered value survives a
+                // reopen; the field — not a cfg_ alias — is the source of truth.
+                Component.onCompleted: text = Plasmoid.configuration.kickClientId
+            }
+
+            QQC2.TextField {
+                id: kickSecretField
+                Kirigami.FormData.label: i18n("Client Secret:")
+                visible: !Plasmoid.configuration.kickLinked
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 18
+                echoMode: TextInput.Password
+                Component.onCompleted: text = Plasmoid.configuration.kickClientSecret
+            }
+
+            QQC2.Button {
+                Kirigami.FormData.label: i18n("Kick:")
+                // Live state, like the Twitch button: flips the instant the
+                // widget validates or drops the credentials.
+                text: Plasmoid.configuration.kickLinked
+                    ? i18n("Disconnect Kick account")
+                    : i18n("Connect Kick account")
+                icon.name: Plasmoid.configuration.kickLinked ? "system-switch-user" : "link"
+                enabled: Plasmoid.configuration.kickLinked
+                    || (kickIdField.text.trim().length > 0 && kickSecretField.text.trim().length > 0)
+                onClicked: {
+                    if (Plasmoid.configuration.kickLinked) {
+                        Plasmoid.configuration.kickDisconnectRequested = true;
+                        Plasmoid.configuration.writeConfig();
+                        kickIdField.text = "";
+                        kickSecretField.text = "";
+                    } else {
+                        // Save the credentials, then ask the widget to validate
+                        // them by minting an app token right away.
+                        Plasmoid.configuration.kickClientId = kickIdField.text.trim();
+                        Plasmoid.configuration.kickClientSecret = kickSecretField.text.trim();
+                        Plasmoid.configuration.kickConnectRequested = true;
+                        Plasmoid.configuration.writeConfig();
+                    }
+                }
+            }
+
+            QQC2.Label {
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                text: Plasmoid.configuration.kickLinked
+                    ? i18n("Connected. Your Client ID and Secret are stored on this computer and used only to read public “who's live” data. Disconnecting removes them.")
+                    : i18n("The Client Secret is stored locally on this computer. The widget reads only public live-stream status — it can't post or change anything on your account.")
             }
         }
     }
