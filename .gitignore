@@ -1,6 +1,9 @@
 # Claude Code local settings (machine-specific, not for publishing)
 .claude/
 
+# Built release artifacts
+*.plasmoid
+
 # OS / editor clutter
 *~
 *.swp
