@@ -167,6 +167,24 @@ KCM.SimpleKCM {
                 textFromValue: function(value) { return i18n("%1 seconds", value); }
                 valueFromText: function(text) { return parseInt(text); }
             }
+        }
+
+        // Border / background around the whole widget.
+        FrameSettings {
+            id: widgetFrame
+            Layout.fillWidth: true
+            title: i18n("Widget border / background")
+        }
+
+        // Border / background around each live-streamer entry.
+        FrameSettings {
+            id: chipFrame
+            Layout.fillWidth: true
+            title: i18n("Per-streamer border / background")
+        }
+
+        Kirigami.FormLayout {
+            Layout.fillWidth: true
 
             Kirigami.Separator {
                 Kirigami.FormData.label: i18n("Account")
@@ -202,20 +220,6 @@ KCM.SimpleKCM {
                     ? i18n("Unlinking clears the saved Twitch authorization. You can re-link any time.")
                     : i18n("Links your Twitch account; approve the request in the browser window that opens.")
             }
-        }
-
-        // Border / background around the whole widget.
-        FrameSettings {
-            id: widgetFrame
-            Layout.fillWidth: true
-            title: i18n("Widget border / background")
-        }
-
-        // Border / background around each live-streamer entry.
-        FrameSettings {
-            id: chipFrame
-            Layout.fillWidth: true
-            title: i18n("Per-streamer border / background")
         }
     }
 }
