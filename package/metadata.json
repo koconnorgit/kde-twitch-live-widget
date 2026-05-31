@@ -7,12 +7,12 @@
             }
         ],
         "Category": "Online Services",
-        "Description": "Shows which of your favorite Twitch streamers are live and lets you jump to their channel.",
+        "Description": "Shows which of your favorite Twitch and Kick streamers are live and lets you jump to their channel.",
         "Icon": "media-record",
-        "Id": "io.github.koconnorgit.twitchlive",
+        "Id": "io.github.koconnorgit.whoslive",
         "License": "MIT",
-        "Name": "Twitch Live",
-        "Version": "1.1.2"
+        "Name": "Who's Live",
+        "Version": "1.2.0"
     },
     "KPackageStructure": "Plasma/Applet",
     "X-Plasma-API-Minimum-Version": "6.0"

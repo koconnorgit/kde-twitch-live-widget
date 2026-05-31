@@ -1,8 +1,8 @@
 #!/bin/sh
-# Remove the Twitch Live widget for the current user.
+# Remove the Who's Live widget for the current user.
 set -e
 
-PLUGIN_ID="io.github.koconnorgit.twitchlive"
+PLUGIN_ID="io.github.koconnorgit.whoslive"
 
 if ! command -v kpackagetool6 >/dev/null 2>&1; then
     echo "Error: 'kpackagetool6' not found." >&2

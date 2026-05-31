@@ -19,18 +19,41 @@ PlasmoidItem {
     readonly property string clientId: (root.embeddedClientId
         || Plasmoid.configuration.clientId || "").trim()
 
-    // Currently live channels: [{ login, name, game, viewers, title }]
-    property var liveStreams: []
-    property string statusText: i18n("Loading…")
-    property bool busy: false
+    // ------------------------------------------------------------------
+    // Kick: each user brings their own app credentials (Kick requires a
+    // client secret, so there is no shippable public client like Twitch).
+    // ------------------------------------------------------------------
+    readonly property string kickClientId: (Plasmoid.configuration.kickClientId || "").trim()
+    readonly property string kickClientSecret: (Plasmoid.configuration.kickClientSecret || "").trim()
+    readonly property bool kickConfigured: kickClientId.length > 0 && kickClientSecret.length > 0
 
-    // OAuth / device-flow state
+    // Currently live channels, merged across platforms and sorted by viewers.
+    // Each record: { platform, login, name, game, viewers, title, key }
+    //   platform: "twitch" | "kick"   key: "<platform>:<login>" (color/identity)
+    property var liveStreams: []
+    // Per-provider results; rebuildLiveStreams() merges them into liveStreams.
+    property var twitchStreams: []
+    property var kickStreams: []
+    property string statusText: i18n("Loading…")
+    // Per-provider in-flight guards; `busy` is the combined view for the UI.
+    property bool twitchBusy: false
+    property bool kickBusy: false
+    readonly property bool busy: twitchBusy || kickBusy
+
+    // Twitch OAuth / device-flow state
     // authState: "unlinked" | "linking" | "linked"
     property string authState: (Plasmoid.configuration.refreshToken
         || Plasmoid.configuration.cachedToken) ? "linked" : "unlinked"
     property string userCode: ""
     property string verificationUri: ""
     property string deviceCode: ""
+
+    // Kick connection state (no interactive linking step — "linking" only marks
+    // the brief credential-validation request). kickState: "unlinked" | "linking" | "linked"
+    property string kickState: kickConfigured ? "linked" : "unlinked"
+
+    // At least one platform usable → the widget shows streams instead of setup.
+    readonly property bool anyLinked: authState === "linked" || kickState === "linked"
 
     readonly property int orientation: Plasmoid.configuration.orientation // 0 = horizontal, 1 = vertical
     readonly property int fontSize: Plasmoid.configuration.fontSize
@@ -143,11 +166,13 @@ PlasmoidItem {
         var next = {};
         var grew = false;
         for (var i = 0; i < root.liveStreams.length; i++) {
-            var login = root.liveStreams[i].login;
-            if (prev[login] !== undefined) {
-                next[login] = prev[login];          // still live → keep its color
+            // Key by "<platform>:<login>" so the same name on two platforms gets
+            // its own colour (and doesn't share/steal the other's).
+            var k = root.liveStreams[i].key;
+            if (prev[k] !== undefined) {
+                next[k] = prev[k];                  // still live → keep its color
             } else {
-                next[login] = pickFill(root.chipFillColors).toString(); // newly live
+                next[k] = pickFill(root.chipFillColors).toString(); // newly live
                 grew = true;
             }
         }
@@ -161,13 +186,17 @@ PlasmoidItem {
     Plasmoid.backgroundHints: PlasmaCore.Types.NoBackground
     preferredRepresentation: fullRepresentation
 
-    // Keep the settings-page mirror of link state in sync (display only).
+    // Keep the settings-page mirrors of link state in sync (display only).
     onAuthStateChanged: Plasmoid.configuration.linked = (authState === "linked")
-    Component.onCompleted: Plasmoid.configuration.linked = (authState === "linked")
+    onKickStateChanged: Plasmoid.configuration.kickLinked = (kickState === "linked")
+    Component.onCompleted: {
+        Plasmoid.configuration.linked = (authState === "linked");
+        Plasmoid.configuration.kickLinked = (kickState === "linked");
+    }
 
-    toolTipMainText: i18n("Twitch Live")
-    toolTipSubText: authState !== "linked"
-        ? i18n("Not linked to Twitch")
+    toolTipMainText: i18n("Who's Live")
+    toolTipSubText: !anyLinked
+        ? i18n("Not connected to Twitch or Kick")
         : (liveStreams.length > 0
             ? i18np("%1 channel live", "%1 channels live", liveStreams.length)
             : statusText)
@@ -175,17 +204,46 @@ PlasmoidItem {
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
-    function channelList() {
-        var raw = Plasmoid.configuration.channels || "";
-        return raw.split(/[\s,]+/)
+    function splitChannels(raw) {
+        return (raw || "").split(/[\s,]+/)
                   .map(function (s) { return s.trim().toLowerCase(); })
                   .filter(function (s) { return s.length > 0; });
     }
+    function channelList() { return splitChannels(Plasmoid.configuration.channels); }
+    function kickChannelList() { return splitChannels(Plasmoid.configuration.kickChannels); }
 
     function clearTokens() {
         Plasmoid.configuration.cachedToken = "";
         Plasmoid.configuration.refreshToken = "";
         Plasmoid.configuration.tokenExpiry = 0;
+    }
+
+    function clearKickTokens() {
+        Plasmoid.configuration.kickToken = "";
+        Plasmoid.configuration.kickTokenExpiry = 0;
+    }
+
+    // Merge both providers' results into the sorted list the UI renders, and
+    // refresh the "nobody live" hint. Each provider replaces only its own slice,
+    // so a slow/failed poll on one platform never blanks the other.
+    function rebuildLiveStreams() {
+        var arr = root.twitchStreams.concat(root.kickStreams);
+        arr.sort(function (a, b) { return b.viewers - a.viewers; });
+        root.liveStreams = arr;
+        updateStatus();
+    }
+    // Only owns the idle/empty hint; error strings are set by the callers and
+    // left intact here (they get cleared on the next successful poll).
+    function updateStatus() {
+        if (root.liveStreams.length > 0) { root.statusText = ""; return; }
+        if (!root.anyLinked || root.busy) return;
+        var noChannels = channelList().length === 0 && kickChannelList().length === 0;
+        root.statusText = noChannels ? i18n("No channels configured")
+                                     : i18n("Nobody's live right now");
+    }
+    function refreshAll() {
+        root.checkStreams(false);
+        root.checkKickStreams(false);
     }
 
     // ------------------------------------------------------------------
@@ -281,9 +339,10 @@ PlasmoidItem {
         devicePoll.stop();
         deviceExpiry.stop();
         clearTokens();
-        root.liveStreams = [];
+        root.twitchStreams = [];
         root.authState = "unlinked";
         root.statusText = i18n("Not linked");
+        rebuildLiveStreams();
     }
 
     // ------------------------------------------------------------------
@@ -351,15 +410,15 @@ PlasmoidItem {
     }
 
     function checkStreams(retry) {
-        if (root.authState !== "linked") return;
+        if (root.authState !== "linked") { root.twitchStreams = []; return; }
         var chans = channelList();
         if (chans.length === 0) {
-            root.liveStreams = [];
-            root.statusText = i18n("No channels configured");
+            root.twitchStreams = [];
+            rebuildLiveStreams();
             return;
         }
-        if (root.busy) return;
-        root.busy = true;
+        if (root.twitchBusy) return;
+        root.twitchBusy = true;
 
         ensureToken(function (token) { // onErr below releases busy if no token
             // Helix /streams accepts up to 100 user_login params; only live channels are returned.
@@ -371,25 +430,27 @@ PlasmoidItem {
             xhr.open("GET", "https://api.twitch.tv/helix/streams?" + qs);
             xhr.setRequestHeader("Client-Id", clientId);
             xhr.setRequestHeader("Authorization", "Bearer " + token);
-            // Guard against a stalled request leaving root.busy stuck true (which
+            // Guard against a stalled request leaving twitchBusy stuck true (which
             // would silently wedge every future poll). A network drop/timeout
             // clears busy and surfaces a status instead of going blank forever.
             xhr.timeout = 15000;
             xhr.ontimeout = function () {
-                root.busy = false;
+                root.twitchBusy = false;
                 root.statusText = i18n("Request timed out — will retry");
             };
             xhr.onerror = function () {
-                root.busy = false;
+                root.twitchBusy = false;
                 root.statusText = i18n("Network error — will retry");
             };
             xhr.onreadystatechange = function () {
                 if (xhr.readyState !== XMLHttpRequest.DONE) return;
-                root.busy = false;
+                root.twitchBusy = false;
                 if (xhr.status === 200) {
                     var data = (JSON.parse(xhr.responseText).data) || [];
-                    var arr = data.map(function (s) {
+                    root.twitchStreams = data.map(function (s) {
                         return {
+                            platform: "twitch",
+                            key: "twitch:" + s.user_login,
                             login: s.user_login,
                             name: s.user_name,
                             game: s.game_name || "",
@@ -397,43 +458,202 @@ PlasmoidItem {
                             title: s.title || ""
                         };
                     });
-                    arr.sort(function (a, b) { return b.viewers - a.viewers; });
-                    root.liveStreams = arr;
-                    root.statusText = arr.length ? "" : i18n("Nobody's live right now");
+                    rebuildLiveStreams();
                 } else if (xhr.status === 401 && !retry) {
                     // Access token rejected — drop it and refresh once.
                     Plasmoid.configuration.cachedToken = "";
                     Plasmoid.configuration.tokenExpiry = 0;
                     root.checkStreams(true);
                 } else {
-                    root.statusText = i18n("API error (%1)", xhr.status);
+                    root.statusText = i18n("Twitch API error (%1)", xhr.status);
                 }
             };
             xhr.send();
-        }, function () { root.busy = false; }); // ensureToken failed → unstick polling
+        }, function () { root.twitchBusy = false; }); // ensureToken failed → unstick polling
+    }
+
+    // ------------------------------------------------------------------
+    // Kick: client-credentials app token + public livestream lookup
+    // ------------------------------------------------------------------
+    // The app token is short-lived and carries no refresh token, so when it
+    // expires we just mint a new one straight from the saved credentials.
+    // cb(token) on success; onErr() on any failure (mirrors ensureToken).
+    function ensureKickToken(cb, onErr) {
+        onErr = onErr || function () {};
+        var now = Date.now();
+        var tok = Plasmoid.configuration.kickToken;
+        var exp = Plasmoid.configuration.kickTokenExpiry;
+        if (tok && exp > now + 60000) { cb(tok); return; } // still valid (1 min margin)
+
+        if (!root.kickConfigured) {
+            root.kickState = "unlinked";
+            onErr();
+            return;
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "https://id.kick.com/oauth/token");
+        xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+        xhr.timeout = 15000;
+        xhr.ontimeout = function () {
+            root.statusText = i18n("Request timed out — will retry");
+            onErr();
+        };
+        xhr.onerror = function () {
+            root.statusText = i18n("Network error — will retry");
+            onErr();
+        };
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return;
+            if (xhr.status === 200) {
+                var r = JSON.parse(xhr.responseText);
+                Plasmoid.configuration.kickToken = r.access_token;
+                Plasmoid.configuration.kickTokenExpiry = Date.now() + (r.expires_in * 1000);
+                root.kickState = "linked";
+                cb(r.access_token);
+            } else if (xhr.status === 0) {
+                root.statusText = i18n("Network error — will retry");
+                onErr();
+            } else {
+                // 401/invalid_client → the saved Client ID/Secret are wrong.
+                clearKickTokens();
+                root.kickState = "unlinked";
+                root.statusText = i18n("Kick sign-in failed — check your Client ID and Secret");
+                onErr();
+            }
+        };
+        xhr.send("grant_type=client_credentials" +
+                 "&client_id=" + encodeURIComponent(root.kickClientId) +
+                 "&client_secret=" + encodeURIComponent(root.kickClientSecret));
+    }
+
+    // Validate freshly entered credentials by minting a token now, so the
+    // settings page can confirm the connection instead of failing silently later.
+    function connectKick() {
+        if (!root.kickConfigured) {
+            root.statusText = i18n("Enter your Kick Client ID and Secret first");
+            return;
+        }
+        clearKickTokens();
+        root.kickState = "linking";
+        root.statusText = i18n("Connecting to Kick…");
+        ensureKickToken(function () {
+            root.statusText = i18n("Connected! Checking streams…");
+            root.checkKickStreams(false);
+        }, function () {});
+    }
+
+    function disconnectKick() {
+        clearKickTokens();
+        // Also drop the saved credentials so the disconnect sticks across
+        // restarts (kickState seeds from whether credentials are present).
+        Plasmoid.configuration.kickClientId = "";
+        Plasmoid.configuration.kickClientSecret = "";
+        root.kickStreams = [];
+        root.kickState = "unlinked";
+        rebuildLiveStreams();
+    }
+
+    function checkKickStreams(retry) {
+        if (root.kickState !== "linked") { root.kickStreams = []; return; }
+        var chans = kickChannelList();
+        if (chans.length === 0) {
+            root.kickStreams = [];
+            rebuildLiveStreams();
+            return;
+        }
+        if (root.kickBusy) return;
+        root.kickBusy = true;
+
+        ensureKickToken(function (token) {
+            // /public/v1/channels takes up to 50 slug params and returns every
+            // requested channel (live or not), so we filter on is_live ourselves.
+            var qs = chans.slice(0, 50).map(function (c) {
+                return "slug=" + encodeURIComponent(c);
+            }).join("&");
+
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", "https://api.kick.com/public/v1/channels?" + qs);
+            xhr.setRequestHeader("Authorization", "Bearer " + token);
+            xhr.setRequestHeader("Accept", "application/json");
+            xhr.timeout = 15000;
+            xhr.ontimeout = function () {
+                root.kickBusy = false;
+                root.statusText = i18n("Request timed out — will retry");
+            };
+            xhr.onerror = function () {
+                root.kickBusy = false;
+                root.statusText = i18n("Network error — will retry");
+            };
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== XMLHttpRequest.DONE) return;
+                root.kickBusy = false;
+                if (xhr.status === 200) {
+                    var data = (JSON.parse(xhr.responseText).data) || [];
+                    var arr = [];
+                    for (var i = 0; i < data.length; i++) {
+                        var c = data[i];
+                        if (!c.stream || !c.stream.is_live) continue; // offline → skip
+                        arr.push({
+                            platform: "kick",
+                            key: "kick:" + c.slug,
+                            login: c.slug,
+                            // Kick's channel list carries no display name → use the slug.
+                            name: c.slug,
+                            game: (c.category && c.category.name) || "",
+                            viewers: c.stream.viewer_count || 0,
+                            title: c.stream_title || ""
+                        });
+                    }
+                    root.kickStreams = arr;
+                    rebuildLiveStreams();
+                } else if (xhr.status === 401 && !retry) {
+                    // Token rejected/expired → drop it and re-mint once.
+                    clearKickTokens();
+                    root.checkKickStreams(true);
+                } else {
+                    root.statusText = i18n("Kick API error (%1)", xhr.status);
+                }
+            };
+            xhr.send();
+        }, function () { root.kickBusy = false; });
     }
 
     Timer {
         id: pollTimer
         interval: Math.max(30, Plasmoid.configuration.pollInterval) * 1000
-        running: root.authState === "linked"
+        running: root.anyLinked
         repeat: true
         triggeredOnStart: true
-        onTriggered: root.checkStreams(false)
+        onTriggered: root.refreshAll()
     }
 
-    // Re-check immediately when channels change (while linked).
+    // Re-check immediately when channels change (while connected).
     Connections {
         target: Plasmoid.configuration
         function onChannelsChanged() { root.checkStreams(false); }
-        // The settings Link/Unlink buttons set these flags; consume them here so
-        // the config form never has to touch (and risk clobbering) the tokens.
-        // Guards make these idempotent: re-applying the dialog (which keeps its
-        // local flag set) is a harmless no-op instead of re-firing the flow.
+        function onKickChannelsChanged() { root.checkKickStreams(false); }
+        // The settings Link/Unlink and Kick Connect/Disconnect buttons set these
+        // flags; consume them here so the config form never has to touch (and risk
+        // clobbering) the tokens. Guards make these idempotent: re-applying the
+        // dialog (which keeps its local flag set) is a harmless no-op instead of
+        // re-firing the flow.
         function onUnlinkRequestedChanged() {
             if (Plasmoid.configuration.unlinkRequested) {
                 Plasmoid.configuration.unlinkRequested = false;
                 if (root.authState !== "unlinked") root.unlink();
+            }
+        }
+        function onKickConnectRequestedChanged() {
+            if (Plasmoid.configuration.kickConnectRequested) {
+                Plasmoid.configuration.kickConnectRequested = false;
+                root.connectKick();
+            }
+        }
+        function onKickDisconnectRequestedChanged() {
+            if (Plasmoid.configuration.kickDisconnectRequested) {
+                Plasmoid.configuration.kickDisconnectRequested = false;
+                if (root.kickState !== "unlinked") root.disconnectKick();
             }
         }
         function onLinkRequestedChanged() {
@@ -463,7 +683,7 @@ PlasmoidItem {
                 if (!root.chipFrameEnabled) return "transparent";
                 if (root.chipFillMode === 1) return "transparent"; // gradient set below
                 if (root.chipFillMode === 2) {                     // random per streamer
-                    var rc = root.streamColors[modelData.login];
+                    var rc = root.streamColors[modelData.key];
                     return root.withAlpha(rc ? rc : Kirigami.Theme.backgroundColor,
                                           root.chipFillOpacity);
                 }
@@ -487,11 +707,11 @@ PlasmoidItem {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Kirigami.Units.smallSpacing
 
-                Rectangle { // "live" dot
+                Rectangle { // "live" dot — coloured per platform (Twitch / Kick)
                     Layout.preferredWidth: Math.round(root.fontSize * 0.5)
                     Layout.preferredHeight: Layout.preferredWidth
                     radius: width / 2
-                    color: "#e62117"
+                    color: modelData.platform === "kick" ? "#53FC18" : "#e62117"
                 }
 
                 ColumnLayout {
@@ -526,7 +746,9 @@ PlasmoidItem {
                 cursorShape: Qt.PointingHandCursor
             }
             TapHandler {
-                onTapped: Qt.openUrlExternally("https://twitch.tv/" + modelData.login)
+                onTapped: Qt.openUrlExternally(
+                    (modelData.platform === "kick" ? "https://kick.com/" : "https://twitch.tv/")
+                    + modelData.login)
             }
         }
     }
@@ -542,7 +764,7 @@ PlasmoidItem {
             active: parent.containsMouse
 
             Rectangle { // count badge
-                visible: root.authState === "linked" && root.liveStreams.length > 0
+                visible: root.anyLinked && root.liveStreams.length > 0
                 anchors { right: parent.right; top: parent.top }
                 width: Math.max(height, badge.implicitWidth + 4)
                 height: Math.round(parent.height * 0.5)
@@ -562,10 +784,11 @@ PlasmoidItem {
 
     // ------------------------------------------------------------------
     // Full representation — frameless & transparent.
-    //   • linked + live   → just the clickable streamer names
-    //   • linked + none   → nothing (a faint hint appears on hover)
-    //   • unlinked/linking → the link/approve UI
-    //   • hovering         → small refresh/configure controls appear
+    //   • connected + live    → just the clickable streamer names (Twitch + Kick)
+    //   • connected + none    → nothing (a faint hint appears on hover)
+    //   • nothing connected   → the link/setup UI
+    //   • Twitch linking      → the device-code approve UI
+    //   • hovering            → small refresh/configure controls appear
     // ------------------------------------------------------------------
     fullRepresentation: Item {
         id: rep
@@ -633,10 +856,10 @@ PlasmoidItem {
                : (parent.height - height) / 2
             spacing: Kirigami.Units.smallSpacing
 
-            // ---- not linked: prompt to link ----
+            // ---- nothing connected: prompt to link Twitch and/or set up Kick ----
             ColumnLayout {
                 Layout.fillWidth: true
-                visible: root.authState === "unlinked"
+                visible: !root.anyLinked && root.authState !== "linking"
                 spacing: Kirigami.Units.smallSpacing
 
                 PC3.Label {
@@ -645,7 +868,7 @@ PlasmoidItem {
                     wrapMode: Text.WordWrap
                     opacity: 0.85
                     text: root.clientId
-                        ? i18n("Link your Twitch account to start.")
+                        ? i18n("Link your Twitch account, or set up Kick in settings.")
                         : i18n("Set a Client ID in settings, then link.")
                 }
                 RowLayout {
@@ -721,10 +944,10 @@ PlasmoidItem {
                 }
             }
 
-            // ---- linked + live: the clickable names ----
+            // ---- connected + live: the clickable names ----
             GridLayout {
                 Layout.fillWidth: true
-                visible: root.authState === "linked" && root.liveStreams.length > 0
+                visible: root.anyLinked && root.liveStreams.length > 0
                 // Horizontal: one row of N chips. Vertical: one column.
                 columns: root.orientation === 0 ? Math.max(1, root.liveStreams.length) : 1
                 rowSpacing: Kirigami.Units.smallSpacing
@@ -736,10 +959,10 @@ PlasmoidItem {
                 }
             }
 
-            // ---- linked + nothing live: faint hint, only while hovered ----
+            // ---- connected + nothing live: faint hint, only while hovered ----
             PC3.Label {
                 Layout.fillWidth: true
-                visible: root.authState === "linked" && root.liveStreams.length === 0 && rep.controlsShown
+                visible: root.anyLinked && root.liveStreams.length === 0 && rep.controlsShown
                 text: root.statusText
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
@@ -750,19 +973,19 @@ PlasmoidItem {
             }
         }
 
-        // ---- floating hover controls (top-right), only when linked ----
+        // ---- floating hover controls (top-right), only when connected ----
         RowLayout {
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 0
-            visible: root.authState === "linked" && rep.controlsShown
+            visible: root.anyLinked && rep.controlsShown
             opacity: 0.9
 
             PC3.ToolButton {
                 icon.name: "view-refresh"
                 display: QQC2.AbstractButton.IconOnly
                 enabled: !root.busy
-                onClicked: root.checkStreams(false)
+                onClicked: root.refreshAll()
                 QQC2.ToolTip.text: i18n("Refresh now")
                 QQC2.ToolTip.visible: hovered
             }
