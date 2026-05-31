@@ -289,7 +289,11 @@ PlasmoidItem {
     // ------------------------------------------------------------------
     // Token use + refresh (public client: refresh needs no secret)
     // ------------------------------------------------------------------
-    function ensureToken(cb) {
+    // cb(token) on success; onErr() on any failure (no token, refresh rejected,
+    // network error/timeout). Callers rely on exactly one of the two firing so
+    // they can release state (e.g. root.busy) on every path.
+    function ensureToken(cb, onErr) {
+        onErr = onErr || function () {};
         var now = Date.now();
         var tok = Plasmoid.configuration.cachedToken;
         var exp = Plasmoid.configuration.tokenExpiry;
@@ -302,12 +306,22 @@ PlasmoidItem {
         if (!rt) {
             root.authState = "unlinked";
             root.statusText = i18n("Link your Twitch account");
+            onErr();
             return;
         }
 
         var xhr = new XMLHttpRequest();
         xhr.open("POST", "https://id.twitch.tv/oauth2/token");
         xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+        xhr.timeout = 15000;
+        xhr.ontimeout = function () {
+            root.statusText = i18n("Request timed out — will retry");
+            onErr();
+        };
+        xhr.onerror = function () {
+            root.statusText = i18n("Network error — will retry");
+            onErr();
+        };
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== XMLHttpRequest.DONE) return;
             if (xhr.status === 200) {
@@ -318,11 +332,17 @@ PlasmoidItem {
                 Plasmoid.configuration.tokenExpiry = Date.now() + (r.expires_in * 1000);
                 root.authState = "linked";
                 cb(r.access_token);
+            } else if (xhr.status === 0) {
+                // Some failures reach DONE with status 0 (no ontimeout/onerror) —
+                // treat as a transient network error, not a revoked token.
+                root.statusText = i18n("Network error — will retry");
+                onErr();
             } else {
                 // refresh token revoked or 30-day-expired → require re-link
                 clearTokens();
                 root.authState = "unlinked";
                 root.statusText = i18n("Session expired — please re-link");
+                onErr();
             }
         };
         xhr.send("grant_type=refresh_token" +
@@ -341,7 +361,7 @@ PlasmoidItem {
         if (root.busy) return;
         root.busy = true;
 
-        ensureToken(function (token) {
+        ensureToken(function (token) { // onErr below releases busy if no token
             // Helix /streams accepts up to 100 user_login params; only live channels are returned.
             var qs = chans.slice(0, 100).map(function (c) {
                 return "user_login=" + encodeURIComponent(c);
@@ -351,6 +371,18 @@ PlasmoidItem {
             xhr.open("GET", "https://api.twitch.tv/helix/streams?" + qs);
             xhr.setRequestHeader("Client-Id", clientId);
             xhr.setRequestHeader("Authorization", "Bearer " + token);
+            // Guard against a stalled request leaving root.busy stuck true (which
+            // would silently wedge every future poll). A network drop/timeout
+            // clears busy and surfaces a status instead of going blank forever.
+            xhr.timeout = 15000;
+            xhr.ontimeout = function () {
+                root.busy = false;
+                root.statusText = i18n("Request timed out — will retry");
+            };
+            xhr.onerror = function () {
+                root.busy = false;
+                root.statusText = i18n("Network error — will retry");
+            };
             xhr.onreadystatechange = function () {
                 if (xhr.readyState !== XMLHttpRequest.DONE) return;
                 root.busy = false;
@@ -378,7 +410,7 @@ PlasmoidItem {
                 }
             };
             xhr.send();
-        });
+        }, function () { root.busy = false; }); // ensureToken failed → unstick polling
     }
 
     Timer {
