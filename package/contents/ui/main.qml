@@ -39,6 +39,18 @@ PlasmoidItem {
     property bool twitchBusy: false
     property bool kickBusy: false
     readonly property bool busy: twitchBusy || kickBusy
+    // Wall-clock stamp (Date.now) of when each guard was raised. A request can
+    // never legitimately outlive its 15s xhr.timeout, so a guard older than this
+    // window is stale and gets force-cleared on the next poll. This is what
+    // recovers from suspend: when a poll's request is in flight as the machine
+    // sleeps, the socket dies silently and — because the event loop is frozen —
+    // the xhr.timeout that would normally release the guard never fires, wedging
+    // it true forever. Date.now keeps ticking through sleep, so on resume the
+    // stamp reads as ancient and the guard self-heals instead of freezing the
+    // widget on its pre-sleep snapshot.
+    readonly property int busyStaleMs: 2 * 15000 // 2× the per-request xhr.timeout
+    property double twitchPollStart: 0
+    property double kickPollStart: 0
 
     // Twitch OAuth / device-flow state
     // authState: "unlinked" | "linking" | "linked"
@@ -417,8 +429,9 @@ PlasmoidItem {
             rebuildLiveStreams();
             return;
         }
-        if (root.twitchBusy) return;
+        if (root.twitchBusy && (Date.now() - root.twitchPollStart) < root.busyStaleMs) return;
         root.twitchBusy = true;
+        root.twitchPollStart = Date.now();
 
         ensureToken(function (token) { // onErr below releases busy if no token
             // Helix /streams accepts up to 100 user_login params; only live channels are returned.
@@ -562,8 +575,9 @@ PlasmoidItem {
             rebuildLiveStreams();
             return;
         }
-        if (root.kickBusy) return;
+        if (root.kickBusy && (Date.now() - root.kickPollStart) < root.busyStaleMs) return;
         root.kickBusy = true;
+        root.kickPollStart = Date.now();
 
         ensureKickToken(function (token) {
             // /public/v1/channels takes up to 50 slug params and returns every
