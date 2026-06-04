@@ -18,6 +18,7 @@ KCM.SimpleKCM {
     property alias cfg_useCurlResume: curlResumeCheck.checked
     property alias cfg_fontSize: fontSpin.value
     property alias cfg_orientation: orientationCombo.currentIndex
+    property alias cfg_showTooltip: tooltipCheck.checked
     property alias cfg_hAlign: hAlignCombo.currentIndex
     property alias cfg_vAlign: vAlignCombo.currentIndex
     property alias cfg_hoverDelay: hoverSpin.value
@@ -108,6 +109,15 @@ KCM.SimpleKCM {
                 id: orientationCombo
                 Kirigami.FormData.label: i18n("Expand:")
                 model: [i18n("Horizontally"), i18n("Vertically")]
+            }
+
+            QQC2.CheckBox {
+                id: tooltipCheck
+                Kirigami.FormData.label: i18n("Tooltip:")
+                text: i18n("Show stream details on hover")
+                // Only has a visible effect when expanding horizontally; vertical
+                // mode already shows the same detail inline beneath each name.
+                enabled: orientationCombo.currentIndex === 0
             }
 
             QQC2.ComboBox {

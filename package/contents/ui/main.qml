@@ -69,6 +69,7 @@ PlasmoidItem {
     readonly property bool anyLinked: authState === "linked" || kickState === "linked"
 
     readonly property int orientation: Plasmoid.configuration.orientation // 0 = horizontal, 1 = vertical
+    readonly property bool showTooltip: Plasmoid.configuration.showTooltip // hover details in horizontal mode
     readonly property int fontSize: Plasmoid.configuration.fontSize
     readonly property string fontColor: Plasmoid.configuration.fontColor // "" = theme text color
     readonly property string fontFamily: Plasmoid.configuration.fontFamily // "" = default font
@@ -978,7 +979,7 @@ PlasmoidItem {
                 return modelData.title.length > 0 ? modelData.title + "\n" + meta : meta;
             }
             QQC2.ToolTip.text: chip.tipText
-            QQC2.ToolTip.visible: root.orientation === 0 && hover.hovered
+            QQC2.ToolTip.visible: root.showTooltip && root.orientation === 0 && hover.hovered
             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
 
             RowLayout {

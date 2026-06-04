@@ -46,6 +46,13 @@
             <default>1</default>
         </entry>
 
+        <!-- Show a hover tooltip (stream title + category • viewers) on each
+             streamer. Only takes effect in horizontal mode, where that detail
+             isn't already shown inline. On by default. -->
+        <entry name="showTooltip" type="Bool">
+            <default>true</default>
+        </entry>
+
         <!-- Empty string = use the current Plasma theme's text color -->
         <entry name="fontColor" type="String">
             <default></default>
