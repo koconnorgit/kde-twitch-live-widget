@@ -195,18 +195,47 @@ KCM.SimpleKCM {
                 Kirigami.FormData.isSection: true
             }
 
-            QQC2.CheckBox {
-                id: curlResumeCheck
+            // Checkbox plus an inline "What is this?" link; the long explanation
+            // lives in the link's hover tooltip instead of always taking up space.
+            RowLayout {
                 Kirigami.FormData.label: i18n("Faster recovery:")
-                text: i18n("Refresh through an external curl process")
-            }
+                spacing: Kirigami.Units.largeSpacing
 
-            QQC2.Label {
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
-                wrapMode: Text.WordWrap
-                opacity: 0.7
-                font: Kirigami.Theme.smallFont
-                text: i18n("When the computer wakes from sleep, the network connection the widget had before sleeping is dead, but the desktop keeps reusing it — so the widget can keep showing a streamer as live (or offline) for up to ~15 minutes, until the system finally drops the stale connection.\n\nTurn this on to fetch stream status through a separate curl program instead. curl opens a brand-new connection each time, so the widget corrects itself within seconds of waking.\n\nSecurity note: with this on, the Twitch access token is passed to curl on its command line, where it is briefly visible to other user accounts on this computer (via /proc) for the moment each check runs. The token only reads public live-stream status, and your Kick Client Secret is never sent this way. On a single-user computer the risk is minimal.\n\nLeave it off (the default) and the widget uses its built-in connection and simply self-corrects within ~15 minutes after waking. Requires curl to be installed; if it isn't found, the widget falls back to the built-in behavior automatically.")
+                QQC2.CheckBox {
+                    id: curlResumeCheck
+                    text: i18n("Refresh through an external curl process")
+                }
+
+                QQC2.Label {
+                    id: curlHelpLink
+                    text: i18n("What is this?")
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    font.underline: curlHelpArea.containsMouse
+                    color: Kirigami.Theme.linkColor
+
+                    MouseArea {
+                        id: curlHelpArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                    }
+
+                    QQC2.ToolTip {
+                        id: curlHelpTip
+                        visible: curlHelpArea.containsMouse
+                        delay: Kirigami.Units.toolTipDelay
+                        // Fixed width so the multi-paragraph text wraps instead of
+                        // stretching into one giant line.
+                        implicitWidth: Kirigami.Units.gridUnit * 24
+                        text: i18n("When the computer wakes from sleep, the network connection the widget had before sleeping is dead, but the desktop keeps reusing it — so the widget can keep showing a streamer as live (or offline) for up to ~15 minutes, until the system finally drops the stale connection.\n\nTurn this on to fetch stream status through a separate curl program instead. curl opens a brand-new connection each time, so the widget corrects itself within seconds of waking.\n\nSecurity note: with this on, the Twitch access token is passed to curl on its command line, where it is briefly visible to other user accounts on this computer (via /proc) for the moment each check runs. The token only reads public live-stream status, and your Kick Client Secret is never sent this way. On a single-user computer the risk is minimal.\n\nLeave it off (the default) and the widget uses its built-in connection and simply self-corrects within ~15 minutes after waking. Requires curl to be installed; if it isn't found, the widget falls back to the built-in behavior automatically.")
+                        contentItem: QQC2.Label {
+                            text: curlHelpTip.text
+                            wrapMode: Text.WordWrap
+                            font: Kirigami.Theme.smallFont
+                            width: curlHelpTip.availableWidth
+                        }
+                    }
+                }
             }
         }
 
