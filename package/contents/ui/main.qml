@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PC3
+import org.kde.plasma.plasma5support as P5Support
 import org.kde.kirigami as Kirigami
 
 PlasmoidItem {
@@ -204,6 +205,7 @@ PlasmoidItem {
     Component.onCompleted: {
         Plasmoid.configuration.linked = (authState === "linked");
         Plasmoid.configuration.kickLinked = (kickState === "linked");
+        if (Plasmoid.configuration.useCurlResume) root.probeCurl();
     }
 
     toolTipMainText: i18n("Who's Live")
@@ -256,6 +258,124 @@ PlasmoidItem {
     function refreshAll() {
         root.checkStreams(false);
         root.checkKickStreams(false);
+    }
+
+    // ------------------------------------------------------------------
+    // Unified HTTP transport (curl out-of-process  ·  in-process XHR).
+    //
+    // After resume-from-suspend the desktop's shared QNetworkAccessManager keeps
+    // reusing the TCP socket that died during sleep; every request then hangs
+    // until the kernel's ~15-min TCP retransmit timeout frees it (see the resume
+    // notes below). Routing a poll through an external `curl` process sidesteps
+    // that entirely — a fresh process opens a fresh connection and recovers in
+    // seconds. It's opt-in (Plasmoid.configuration.useCurlResume) and only used
+    // when curl is actually present; otherwise we fall back to the XHR path and
+    // ride out the self-heal. The Kick *token refresh* is deliberately NEVER sent
+    // via curl (it carries the client secret, which would be briefly visible in
+    // the process list) — and it doesn't need to be, since the Kick app token
+    // lasts ~57 days and so never expires across a sleep.
+    // ------------------------------------------------------------------
+    readonly property bool curlEnabled: Plasmoid.configuration.useCurlResume && root.curlAvailable
+    property bool curlAvailable: false   // set by the one-shot probe
+    property bool curlProbed: false
+    property int curlSeq: 0
+    property var curlPending: ({})        // unique command string → done(status,text)
+    readonly property string curlProbeCmd: "command -v curl"
+
+    P5Support.DataSource {
+        id: curlEngine
+        engine: "executable"
+        onNewData: function (source, data) {
+            if (source === root.curlProbeCmd) {
+                curlEngine.disconnectSource(source);
+                root.curlAvailable = (data && data["exit code"] === 0
+                    && ("" + data["stdout"]).trim().length > 0);
+                return;
+            }
+            var done = root.curlPending[source];
+            curlEngine.disconnectSource(source); // run-once; free the slot
+            if (done === undefined) return;       // aborted by the watchdog
+            delete root.curlPending[source];
+            var out = (data && data["stdout"] !== undefined) ? ("" + data["stdout"]) : "";
+            var exitCode = data ? data["exit code"] : 1;
+            // curl appends "\nWLSTATUS:<code>" after the body via -w. A network
+            // failure (no connect / DNS / timeout) → non-zero exit and code 000,
+            // which we surface as status 0 = transient (matches the XHR path).
+            var status = 0, body = "";
+            var marker = "WLSTATUS:";
+            var m = out.lastIndexOf(marker);
+            if (m >= 0) {
+                status = parseInt(out.substring(m + marker.length)) || 0;
+                body = out.substring(0, m).replace(/\n$/, "");
+            }
+            if (exitCode !== 0) status = 0;
+            done(status, body);
+        }
+    }
+
+    function probeCurl() {
+        if (root.curlProbed) return;
+        root.curlProbed = true;
+        curlEngine.connectSource(root.curlProbeCmd);
+    }
+
+    // POSIX-sh single-quote escaping: wrap in '…' and turn every embedded ' into
+    // '\'' . Makes any token / URL / header safe to splice into the command the
+    // executable engine runs via the shell, regardless of its contents.
+    function shq(s) { return "'" + ("" + s).split("'").join("'\\''") + "'"; }
+
+    // Issue one request and call done(status, text). status 0 means a transient
+    // failure (network down / hung / curl error). Returns a handle exposing
+    // abort(), which the watchdog uses to cancel an in-flight request. `useCurl`
+    // selects the transport per call (callers pass root.curlEnabled, except the
+    // Kick refresh which always passes false).
+    function httpSend(useCurl, method, url, headers, body, done) {
+        return useCurl ? curlSend(method, url, headers, body, done)
+                       : xhrSend(method, url, headers, body, done);
+    }
+
+    function xhrSend(method, url, headers, body, done) {
+        var xhr = new XMLHttpRequest();
+        xhr.open(method, url);
+        for (var k in headers) xhr.setRequestHeader(k, headers[k]);
+        xhr.timeout = 15000;
+        var fired = false;
+        function fire(status, text) { if (fired) return; fired = true; done(status, text); }
+        xhr.ontimeout = function () { fire(0, ""); };
+        xhr.onerror = function () { fire(0, ""); };
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return;
+            fire(xhr.status, xhr.responseText);
+        };
+        if (body !== undefined && body !== null) xhr.send(body); else xhr.send();
+        return { abort: function () {
+            fired = true;
+            xhr.onreadystatechange = function () {};
+            xhr.ontimeout = function () {};
+            xhr.onerror = function () {};
+            try { xhr.abort(); } catch (e) {}
+        } };
+    }
+
+    function curlSend(method, url, headers, body, done) {
+        var parts = ["curl", "-sS", "--max-time", "15"];
+        if (method === "POST") {
+            parts.push("-X", "POST");
+            if (body !== undefined && body !== null) parts.push("--data", shq(body));
+        }
+        for (var k in headers) parts.push("-H", shq(k + ": " + headers[k]));
+        parts.push("-w", shq("\\nWLSTATUS:%{http_code}"));
+        parts.push(shq(url));
+        var seq = root.curlSeq++;
+        // Trailing "#<seq>" is a shell comment that just makes the source string
+        // unique (so back-to-back polls aren't deduplicated by the engine).
+        var cmd = parts.join(" ") + " #" + seq;
+        root.curlPending[cmd] = done;
+        curlEngine.connectSource(cmd);
+        return { abort: function () {
+            delete root.curlPending[cmd];
+            curlEngine.disconnectSource(cmd);
+        } };
     }
 
     // ------------------------------------------------------------------
@@ -381,44 +501,42 @@ PlasmoidItem {
             return;
         }
 
-        var xhr = new XMLHttpRequest();
-        xhr.open("POST", "https://id.twitch.tv/oauth2/token");
-        xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-        xhr.timeout = 15000;
-        xhr.ontimeout = function () {
-            root.statusText = i18n("Request timed out — will retry");
-            onErr();
-        };
-        xhr.onerror = function () {
-            root.statusText = i18n("Network error — will retry");
-            onErr();
-        };
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return;
-            if (xhr.status === 200) {
-                var r = JSON.parse(xhr.responseText);
-                Plasmoid.configuration.cachedToken = r.access_token;
-                // refresh tokens are one-time-use — persist the new one
-                if (r.refresh_token) Plasmoid.configuration.refreshToken = r.refresh_token;
-                Plasmoid.configuration.tokenExpiry = Date.now() + (r.expires_in * 1000);
-                root.authState = "linked";
-                cb(r.access_token);
-            } else if (xhr.status === 0) {
-                // Some failures reach DONE with status 0 (no ontimeout/onerror) —
-                // treat as a transient network error, not a revoked token.
-                root.statusText = i18n("Network error — will retry");
-                onErr();
-            } else {
-                // refresh token revoked or 30-day-expired → require re-link
-                clearTokens();
-                root.authState = "unlinked";
-                root.statusText = i18n("Session expired — please re-link");
-                onErr();
-            }
-        };
-        xhr.send("grant_type=refresh_token" +
-                 "&refresh_token=" + encodeURIComponent(rt) +
-                 "&client_id=" + encodeURIComponent(clientId));
+        // Refresh uses curl too when enabled: after a long sleep the Twitch token
+        // has usually expired (it lasts only a few hours), so this very request is
+        // the one that would otherwise hang on the dead post-resume socket. It
+        // carries no client secret (public client), only the refresh token.
+        root.twitchXhr = httpSend(root.curlEnabled, "POST",
+            "https://id.twitch.tv/oauth2/token",
+            { "Content-Type": "application/x-www-form-urlencoded" },
+            "grant_type=refresh_token"
+                + "&refresh_token=" + encodeURIComponent(rt)
+                + "&client_id=" + encodeURIComponent(clientId),
+            function (status, text) {
+                root.twitchXhr = null;
+                if (status === 200) {
+                    var r;
+                    try { r = JSON.parse(text); } catch (e) {
+                        root.statusText = i18n("Network error — will retry");
+                        onErr(); return;
+                    }
+                    Plasmoid.configuration.cachedToken = r.access_token;
+                    // refresh tokens are one-time-use — persist the new one
+                    if (r.refresh_token) Plasmoid.configuration.refreshToken = r.refresh_token;
+                    Plasmoid.configuration.tokenExpiry = Date.now() + (r.expires_in * 1000);
+                    root.authState = "linked";
+                    cb(r.access_token);
+                } else if (status === 0) {
+                    // Transient (network down / hung / curl error) — not a revoked token.
+                    root.statusText = i18n("Network error — will retry");
+                    onErr();
+                } else {
+                    // refresh token revoked or 30-day-expired → require re-link
+                    clearTokens();
+                    root.authState = "unlinked";
+                    root.statusText = i18n("Session expired — please re-link");
+                    onErr();
+                }
+            });
     }
 
     function checkStreams(retry) {
@@ -429,7 +547,9 @@ PlasmoidItem {
             rebuildLiveStreams();
             return;
         }
-        if (root.twitchBusy && (Date.now() - root.twitchPollStart) < root.busyStaleMs) return;
+        if (root.twitchBusy && (Date.now() - root.twitchPollStart) < root.busyStaleMs) {
+            return;
+        }
         root.twitchBusy = true;
         root.twitchPollStart = Date.now();
 
@@ -439,50 +559,53 @@ PlasmoidItem {
                 return "user_login=" + encodeURIComponent(c);
             }).join("&");
 
-            var xhr = new XMLHttpRequest();
-            xhr.open("GET", "https://api.twitch.tv/helix/streams?" + qs);
-            xhr.setRequestHeader("Client-Id", clientId);
-            xhr.setRequestHeader("Authorization", "Bearer " + token);
-            // Guard against a stalled request leaving twitchBusy stuck true (which
-            // would silently wedge every future poll). A network drop/timeout
-            // clears busy and surfaces a status instead of going blank forever.
-            xhr.timeout = 15000;
-            xhr.ontimeout = function () {
-                root.twitchBusy = false;
-                root.statusText = i18n("Request timed out — will retry");
-            };
-            xhr.onerror = function () {
-                root.twitchBusy = false;
-                root.statusText = i18n("Network error — will retry");
-            };
-            xhr.onreadystatechange = function () {
-                if (xhr.readyState !== XMLHttpRequest.DONE) return;
-                root.twitchBusy = false;
-                if (xhr.status === 200) {
-                    var data = (JSON.parse(xhr.responseText).data) || [];
-                    root.twitchStreams = data.map(function (s) {
-                        return {
-                            platform: "twitch",
-                            key: "twitch:" + s.user_login,
-                            login: s.user_login,
-                            name: s.user_name,
-                            game: s.game_name || "",
-                            viewers: s.viewer_count || 0,
-                            title: s.title || ""
-                        };
-                    });
-                    rebuildLiveStreams();
-                } else if (xhr.status === 401 && !retry) {
-                    // Access token rejected — drop it and refresh once.
-                    Plasmoid.configuration.cachedToken = "";
-                    Plasmoid.configuration.tokenExpiry = 0;
-                    root.checkStreams(true);
-                } else {
-                    root.statusText = i18n("Twitch API error (%1)", xhr.status);
-                }
-            };
-            xhr.send();
-        }, function () { root.twitchBusy = false; }); // ensureToken failed → unstick polling
+            // Out-of-process curl when enabled, else in-process XHR. Either way
+            // the callback below clears twitchBusy on every path, so a dropped or
+            // hung request can't silently wedge future polls.
+            root.twitchXhr = httpSend(root.curlEnabled, "GET",
+                "https://api.twitch.tv/helix/streams?" + qs,
+                { "Client-Id": clientId, "Authorization": "Bearer " + token },
+                null,
+                function (status, text) {
+                    root.twitchXhr = null;
+                    root.twitchBusy = false;
+                    if (status === 200) {
+                        root.twitchFailed = false;
+                        var data;
+                        try { data = (JSON.parse(text).data) || []; } catch (e) { data = []; }
+                        root.twitchStreams = data.map(function (s) {
+                            return {
+                                platform: "twitch",
+                                key: "twitch:" + s.user_login,
+                                login: s.user_login,
+                                name: s.user_name,
+                                game: s.game_name || "",
+                                viewers: s.viewer_count || 0,
+                                title: s.title || ""
+                            };
+                        });
+                        rebuildLiveStreams();
+                        root.noteHealthy();
+                    } else if (status === 401 && !retry) {
+                        // Access token rejected — drop it and refresh once.
+                        Plasmoid.configuration.cachedToken = "";
+                        Plasmoid.configuration.tokenExpiry = 0;
+                        root.checkStreams(true);
+                    } else if (status === 0 || status >= 500) {
+                        // Connection failed or server-side hiccup → transient, fast-retry.
+                        root.twitchFailed = true;
+                        root.statusText = i18n("Network error — will retry");
+                        root.scheduleRetry();
+                    } else {
+                        root.statusText = i18n("Twitch API error (%1)", status);
+                    }
+                });
+        }, function () { // ensureToken failed (e.g. refresh request died on a
+            // not-yet-up network at resume) → unstick polling and fast-retry.
+            root.twitchBusy = false;
+            root.twitchFailed = true;
+            root.scheduleRetry();
+        });
     }
 
     // ------------------------------------------------------------------
@@ -504,40 +627,40 @@ PlasmoidItem {
             return;
         }
 
-        var xhr = new XMLHttpRequest();
-        xhr.open("POST", "https://id.kick.com/oauth/token");
-        xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-        xhr.timeout = 15000;
-        xhr.ontimeout = function () {
-            root.statusText = i18n("Request timed out — will retry");
-            onErr();
-        };
-        xhr.onerror = function () {
-            root.statusText = i18n("Network error — will retry");
-            onErr();
-        };
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return;
-            if (xhr.status === 200) {
-                var r = JSON.parse(xhr.responseText);
-                Plasmoid.configuration.kickToken = r.access_token;
-                Plasmoid.configuration.kickTokenExpiry = Date.now() + (r.expires_in * 1000);
-                root.kickState = "linked";
-                cb(r.access_token);
-            } else if (xhr.status === 0) {
-                root.statusText = i18n("Network error — will retry");
-                onErr();
-            } else {
-                // 401/invalid_client → the saved Client ID/Secret are wrong.
-                clearKickTokens();
-                root.kickState = "unlinked";
-                root.statusText = i18n("Kick sign-in failed — check your Client ID and Secret");
-                onErr();
-            }
-        };
-        xhr.send("grant_type=client_credentials" +
-                 "&client_id=" + encodeURIComponent(root.kickClientId) +
-                 "&client_secret=" + encodeURIComponent(root.kickClientSecret));
+        // Kick's token request ALWAYS stays in-process (httpSend false): it is the
+        // only call carrying the client secret, so it must never reach a curl
+        // command line. It also never needs curl — the Kick app token lasts ~57
+        // days, so it doesn't expire across a sleep and is not part of the
+        // resume-staleness problem.
+        root.kickXhr = httpSend(false, "POST",
+            "https://id.kick.com/oauth/token",
+            { "Content-Type": "application/x-www-form-urlencoded" },
+            "grant_type=client_credentials"
+                + "&client_id=" + encodeURIComponent(root.kickClientId)
+                + "&client_secret=" + encodeURIComponent(root.kickClientSecret),
+            function (status, text) {
+                root.kickXhr = null;
+                if (status === 200) {
+                    var r;
+                    try { r = JSON.parse(text); } catch (e) {
+                        root.statusText = i18n("Network error — will retry");
+                        onErr(); return;
+                    }
+                    Plasmoid.configuration.kickToken = r.access_token;
+                    Plasmoid.configuration.kickTokenExpiry = Date.now() + (r.expires_in * 1000);
+                    root.kickState = "linked";
+                    cb(r.access_token);
+                } else if (status === 0) {
+                    root.statusText = i18n("Network error — will retry");
+                    onErr();
+                } else {
+                    // 401/invalid_client → the saved Client ID/Secret are wrong.
+                    clearKickTokens();
+                    root.kickState = "unlinked";
+                    root.statusText = i18n("Kick sign-in failed — check your Client ID and Secret");
+                    onErr();
+                }
+            });
     }
 
     // Validate freshly entered credentials by minting a token now, so the
@@ -575,7 +698,9 @@ PlasmoidItem {
             rebuildLiveStreams();
             return;
         }
-        if (root.kickBusy && (Date.now() - root.kickPollStart) < root.busyStaleMs) return;
+        if (root.kickBusy && (Date.now() - root.kickPollStart) < root.busyStaleMs) {
+            return;
+        }
         root.kickBusy = true;
         root.kickPollStart = Date.now();
 
@@ -586,51 +711,54 @@ PlasmoidItem {
                 return "slug=" + encodeURIComponent(c);
             }).join("&");
 
-            var xhr = new XMLHttpRequest();
-            xhr.open("GET", "https://api.kick.com/public/v1/channels?" + qs);
-            xhr.setRequestHeader("Authorization", "Bearer " + token);
-            xhr.setRequestHeader("Accept", "application/json");
-            xhr.timeout = 15000;
-            xhr.ontimeout = function () {
-                root.kickBusy = false;
-                root.statusText = i18n("Request timed out — will retry");
-            };
-            xhr.onerror = function () {
-                root.kickBusy = false;
-                root.statusText = i18n("Network error — will retry");
-            };
-            xhr.onreadystatechange = function () {
-                if (xhr.readyState !== XMLHttpRequest.DONE) return;
-                root.kickBusy = false;
-                if (xhr.status === 200) {
-                    var data = (JSON.parse(xhr.responseText).data) || [];
-                    var arr = [];
-                    for (var i = 0; i < data.length; i++) {
-                        var c = data[i];
-                        if (!c.stream || !c.stream.is_live) continue; // offline → skip
-                        arr.push({
-                            platform: "kick",
-                            key: "kick:" + c.slug,
-                            login: c.slug,
-                            // Kick's channel list carries no display name → use the slug.
-                            name: c.slug,
-                            game: (c.category && c.category.name) || "",
-                            viewers: c.stream.viewer_count || 0,
-                            title: c.stream_title || ""
-                        });
+            root.kickXhr = httpSend(root.curlEnabled, "GET",
+                "https://api.kick.com/public/v1/channels?" + qs,
+                { "Authorization": "Bearer " + token, "Accept": "application/json" },
+                null,
+                function (status, text) {
+                    root.kickXhr = null;
+                    root.kickBusy = false;
+                    if (status === 200) {
+                        root.kickFailed = false;
+                        var data;
+                        try { data = (JSON.parse(text).data) || []; } catch (e) { data = []; }
+                        var arr = [];
+                        for (var i = 0; i < data.length; i++) {
+                            var c = data[i];
+                            if (!c.stream || !c.stream.is_live) continue; // offline → skip
+                            arr.push({
+                                platform: "kick",
+                                key: "kick:" + c.slug,
+                                login: c.slug,
+                                // Kick's channel list carries no display name → use the slug.
+                                name: c.slug,
+                                game: (c.category && c.category.name) || "",
+                                viewers: c.stream.viewer_count || 0,
+                                title: c.stream_title || ""
+                            });
+                        }
+                        root.kickStreams = arr;
+                        rebuildLiveStreams();
+                        root.noteHealthy();
+                    } else if (status === 401 && !retry) {
+                        // Token rejected/expired → drop it and re-mint once.
+                        clearKickTokens();
+                        root.checkKickStreams(true);
+                    } else if (status === 0 || status >= 500) {
+                        // Connection failed or server-side hiccup → transient, fast-retry.
+                        root.kickFailed = true;
+                        root.statusText = i18n("Network error — will retry");
+                        root.scheduleRetry();
+                    } else {
+                        root.statusText = i18n("Kick API error (%1)", status);
                     }
-                    root.kickStreams = arr;
-                    rebuildLiveStreams();
-                } else if (xhr.status === 401 && !retry) {
-                    // Token rejected/expired → drop it and re-mint once.
-                    clearKickTokens();
-                    root.checkKickStreams(true);
-                } else {
-                    root.statusText = i18n("Kick API error (%1)", xhr.status);
-                }
-            };
-            xhr.send();
-        }, function () { root.kickBusy = false; });
+                });
+        }, function () { // ensureKickToken failed (network not up at resume) →
+            // unstick polling and fast-retry instead of waiting a full interval.
+            root.kickBusy = false;
+            root.kickFailed = true;
+            root.scheduleRetry();
+        });
     }
 
     Timer {
@@ -639,7 +767,132 @@ PlasmoidItem {
         running: root.anyLinked
         repeat: true
         triggeredOnStart: true
-        onTriggered: root.refreshAll()
+        onTriggered: {
+            root.refreshAll();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Resume-from-suspend recovery.
+    //
+    // pollTimer above is driven by the monotonic clock, which pauses while the
+    // machine is asleep — so after a long suspend its next tick can be most of
+    // an interval away, and any in-flight poll guard left raised as the machine
+    // went down keeps the widget pinned to its pre-sleep snapshot until then.
+    // The busyStaleMs guard only self-heals once a poll actually runs, so it
+    // inherits the same delay. We instead watch the WALL clock (Date.now, which
+    // keeps counting through suspend) on a short heartbeat: a tick that lands
+    // far later than its schedule means the machine just woke, so we drop any
+    // wedged guards and re-arm the poll cadence to refresh immediately.
+    property double lastHeartbeat: 0
+    readonly property int heartbeatMs: 30000
+    Timer {
+        id: resumeWatch
+        interval: root.heartbeatMs
+        running: root.anyLinked
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            var now = Date.now();
+            // Allow generous slack over the 30s cadence so ordinary event-loop
+            // jitter never reads as a resume; only a real time jump trips it.
+            var jumped = root.lastHeartbeat > 0
+                && (now - root.lastHeartbeat) > root.heartbeatMs + 15000;
+            root.lastHeartbeat = now;
+            if (jumped) {
+                root.twitchBusy = false;
+                root.kickBusy = false;
+                pollTimer.restart(); // triggeredOnStart → refreshAll() right now
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Transient-failure fast retry.
+    //
+    // Right after resume the network stack is usually still down for a few
+    // seconds, so the first poll fails instantly (status 0 / network error).
+    // Without this the widget would then sit on its pre-sleep snapshot until the
+    // next *scheduled* poll — a full pollInterval (≥30s) of staleness, and after
+    // a deep suspend the outage can span several of those, which reads as "never
+    // recovers". On any transient failure we instead re-poll on a short backoff
+    // (2s → 4s → … → 30s), resetting to idle once both providers are healthy
+    // again. A genuine longer outage is simply ridden out at the 30s ceiling.
+    property bool twitchFailed: false
+    property bool kickFailed: false
+    property int retryBackoffMs: 0          // 0 = not currently retrying
+    readonly property int retryBaseMs: 2000
+    readonly property int retryMaxMs: 10000 // cap the gap so recovery after the
+                                            // network returns is ≤ this, not 30s
+    // The single in-flight request handle per provider (refresh token *or*
+    // streams call; only one is ever live at a time per provider). Tracked so the
+    // watchdog can abort a hung request instead of abandoning it: an abandoned
+    // request would (a) pile up into a "herd" that all completes at once on
+    // reconnect, and (b) for the token refresh, let several one-time-use refresh
+    // tokens be spent together → all but one get invalid_grant → a spurious
+    // unlink. Aborting a request that never reached the server avoids both. Each
+    // handle is whatever httpSend() returned (XHR- or curl-backed) and exposes a
+    // single abort() that silences/cancels it.
+    property var twitchXhr: null
+    property var kickXhr: null
+    function abortInflight(x) {
+        if (x && x.abort) { try { x.abort(); } catch (e) {} }
+    }
+    Timer {
+        id: retryTimer
+        repeat: false
+        onTriggered: {
+            root.refreshAll();
+        }
+    }
+    // Arm the retry after a transient failure. Both providers can fail in the
+    // same cycle; only the first arms it (and advances the backoff one step), so
+    // the interval grows once per actual retry rather than once per failure.
+    function scheduleRetry() {
+        if (retryTimer.running) return; // already armed for this cycle
+        root.retryBackoffMs = root.retryBackoffMs > 0
+            ? Math.min(root.retryBackoffMs * 2, root.retryMaxMs)
+            : root.retryBaseMs;
+        retryTimer.interval = root.retryBackoffMs;
+        retryTimer.restart();
+    }
+    // A provider just succeeded; if neither is in a failed state, stop retrying.
+    function noteHealthy() {
+        if (!root.twitchFailed && !root.kickFailed) {
+            retryTimer.stop();
+            root.retryBackoffMs = 0;
+        }
+    }
+
+    // Watchdog for silently-hung requests.
+    //
+    // When the network is down at the instant a request is sent, the XHR can
+    // hang with NO callback ever firing — not onreadystatechange, not onerror,
+    // and (observed) not even the 15s xhr.timeout. That strands the busy guard
+    // true and, fatally, never triggers scheduleRetry, so the error-path retry
+    // above can't help. A Timer fires reliably regardless, so while a request is
+    // in flight we watch for one that has outlived watchdogMs, force-fail it, and
+    // kick off the same backoff retry. This is the recovery path that does not
+    // depend on the network stack ever calling us back.
+    readonly property int watchdogMs: 8000
+    Timer {
+        id: watchdog
+        interval: 2000
+        running: root.busy   // only ticks while a poll is in flight
+        repeat: true
+        onTriggered: {
+            var now = Date.now();
+            var hung = false;
+            if (root.twitchBusy && (now - root.twitchPollStart) > root.watchdogMs) {
+                root.abortInflight(root.twitchXhr); root.twitchXhr = null;
+                root.twitchBusy = false; root.twitchFailed = true; hung = true;
+            }
+            if (root.kickBusy && (now - root.kickPollStart) > root.watchdogMs) {
+                root.abortInflight(root.kickXhr); root.kickXhr = null;
+                root.kickBusy = false; root.kickFailed = true; hung = true;
+            }
+            if (hung) root.scheduleRetry();
+        }
     }
 
     // Re-check immediately when channels change (while connected).
@@ -647,6 +900,11 @@ PlasmoidItem {
         target: Plasmoid.configuration
         function onChannelsChanged() { root.checkStreams(false); }
         function onKickChannelsChanged() { root.checkKickStreams(false); }
+        // First time the user opts into curl, probe for it so curlEnabled can
+        // flip without waiting for a restart.
+        function onUseCurlResumeChanged() {
+            if (Plasmoid.configuration.useCurlResume) root.probeCurl();
+        }
         // The settings Link/Unlink and Kick Connect/Disconnect buttons set these
         // flags; consume them here so the config form never has to touch (and risk
         // clobbering) the tokens. Guards make these idempotent: re-applying the

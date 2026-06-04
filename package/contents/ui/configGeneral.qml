@@ -15,6 +15,7 @@ KCM.SimpleKCM {
     property alias cfg_channels: channelsField.text
     property alias cfg_kickChannels: kickChannelsField.text
     property alias cfg_pollInterval: pollSpin.value
+    property alias cfg_useCurlResume: curlResumeCheck.checked
     property alias cfg_fontSize: fontSpin.value
     property alias cfg_orientation: orientationCombo.currentIndex
     property alias cfg_hAlign: hAlignCombo.currentIndex
@@ -187,6 +188,25 @@ KCM.SimpleKCM {
                 stepSize: 30
                 textFromValue: function(value) { return i18n("%1 seconds", value); }
                 valueFromText: function(text) { return parseInt(text); }
+            }
+
+            Kirigami.Separator {
+                Kirigami.FormData.label: i18n("Resume after sleep")
+                Kirigami.FormData.isSection: true
+            }
+
+            QQC2.CheckBox {
+                id: curlResumeCheck
+                Kirigami.FormData.label: i18n("Faster recovery:")
+                text: i18n("Refresh through an external curl process")
+            }
+
+            QQC2.Label {
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                text: i18n("When the computer wakes from sleep, the network connection the widget had before sleeping is dead, but the desktop keeps reusing it — so the widget can keep showing a streamer as live (or offline) for up to ~15 minutes, until the system finally drops the stale connection.\n\nTurn this on to fetch stream status through a separate curl program instead. curl opens a brand-new connection each time, so the widget corrects itself within seconds of waking.\n\nSecurity note: with this on, the Twitch access token is passed to curl on its command line, where it is briefly visible to other user accounts on this computer (via /proc) for the moment each check runs. The token only reads public live-stream status, and your Kick Client Secret is never sent this way. On a single-user computer the risk is minimal.\n\nLeave it off (the default) and the widget uses its built-in connection and simply self-corrects within ~15 minutes after waking. Requires curl to be installed; if it isn't found, the widget falls back to the built-in behavior automatically.")
             }
         }
 

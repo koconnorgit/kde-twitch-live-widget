@@ -27,6 +27,15 @@
             <default>60</default>
         </entry>
 
+        <!-- Opt-in: poll through an external `curl` process so the widget
+             recovers within seconds of resume-from-sleep instead of riding out
+             the kernel's ~15-min TCP timeout on the connection that died during
+             suspend. Off by default; falls back to the built-in path silently if
+             curl is missing. See ui/configGeneral.qml for the user-facing note. -->
+        <entry name="useCurlResume" type="Bool">
+            <default>false</default>
+        </entry>
+
         <!-- Pixel size of the streamer name labels -->
         <entry name="fontSize" type="Int">
             <default>14</default>
