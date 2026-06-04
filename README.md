@@ -52,21 +52,39 @@ ones you want.
 
 ## Install
 
+### From a release (recommended)
+
+Download the latest `whos-live.plasmoid` and install it — no clone or build
+needed:
+
+```sh
+curl -LO https://github.com/koconnorgit/kde-whos-live-widget/releases/latest/download/whos-live.plasmoid
+kpackagetool6 --type Plasma/Applet --install whos-live.plasmoid
+```
+
+Already have an older version? Swap `--install` for `--upgrade`. You can also
+just grab the file from the [Releases page](https://github.com/koconnorgit/kde-whos-live-widget/releases/latest)
+in your browser, or install it from **Add Widgets… → Get New Widgets…** once
+it's listed on the [KDE Store](https://www.opendesktop.org/p/2361661/).
+
+### From source
+
 ```sh
 git clone https://github.com/koconnorgit/kde-whos-live-widget.git
 cd kde-whos-live-widget
 ./install.sh
 ```
 
-Then **right-click your desktop → Add Widgets…**, search for **Who's Live**,
-and drag it onto your desktop. If it doesn't show up right away, restart the
-shell:
+To update later, `git pull` and run `./install.sh` again.
+
+### Either way
+
+**Right-click your desktop → Add Widgets…**, search for **Who's Live**, and
+drag it onto your desktop. If it doesn't show up right away, restart the shell:
 
 ```sh
 kquitapp6 plasmashell && kstart plasmashell
 ```
-
-To update later, `git pull` and run `./install.sh` again.
 
 ---
 
