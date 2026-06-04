@@ -33,15 +33,23 @@ jobs:
       - name: Build .plasmoid
         run: ./build.sh
 
+      # A stable-named copy alongside the versioned one. GitHub's
+      # /releases/latest/download/<asset> redirect only works for an asset whose
+      # name doesn't change between releases, so this is what a permanent "latest"
+      # link (e.g. the KDE Store download URL) points at. The versioned file is
+      # kept too, so each release still has a clearly-labelled artifact.
+      - name: Add stable-named copy for a permanent "latest" link
+        run: cp whos-live-v*.plasmoid whos-live.plasmoid
+
       - name: Publish to the Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Upsert: create the Release on first run, otherwise just attach the
-          # artifact (--clobber so re-runs overwrite a stale upload).
+          # artifacts (--clobber so re-runs overwrite stale uploads).
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" whos-live-v*.plasmoid --clobber
+            gh release upload "$GITHUB_REF_NAME" whos-live-v*.plasmoid whos-live.plasmoid --clobber
           else
-            gh release create "$GITHUB_REF_NAME" whos-live-v*.plasmoid \
+            gh release create "$GITHUB_REF_NAME" whos-live-v*.plasmoid whos-live.plasmoid \
               --title "$GITHUB_REF_NAME" --generate-notes
           fi
