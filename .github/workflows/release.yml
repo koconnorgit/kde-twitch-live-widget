@@ -1,0 +1,47 @@
+name: Release
+
+# Build the .plasmoid and attach it to the GitHub Release whenever a version
+# tag is pushed (e.g. `git push origin v1.4.1`). GitHub-first distribution:
+# every tag gets a downloadable artifact that doubles as the KDE Store upload.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # needed to create/update the Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Guard against a tag whose metadata.json version doesn't match — the KDE
+      # Store keys "update available" off that field, so a mismatch ships a
+      # build that looks like the wrong version to users.
+      - name: Verify metadata version matches tag
+        run: |
+          version=$(sed -n 's/.*"Version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package/metadata.json)
+          tag="${GITHUB_REF_NAME#v}"
+          echo "metadata.json: $version   tag: $tag"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::metadata.json Version ($version) does not match tag ($tag). Bump package/metadata.json before tagging."
+            exit 1
+          fi
+
+      - name: Build .plasmoid
+        run: ./build.sh
+
+      - name: Publish to the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Upsert: create the Release on first run, otherwise just attach the
+          # artifact (--clobber so re-runs overwrite a stale upload).
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" whos-live-v*.plasmoid --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" whos-live-v*.plasmoid \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
