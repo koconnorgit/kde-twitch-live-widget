@@ -970,6 +970,17 @@ PlasmoidItem {
             implicitHeight: chipRow.implicitHeight + Kirigami.Units.smallSpacing
             Layout.fillWidth: root.orientation === 1
 
+            // Surface on hover what vertical mode would show inline, plus the
+            // full stream title: title on top, then "game • viewers" beneath.
+            readonly property string tipText: {
+                var v = i18np("%1 viewer", "%1 viewers", modelData.viewers);
+                var meta = modelData.game.length > 0 ? modelData.game + " • " + v : v;
+                return modelData.title.length > 0 ? modelData.title + "\n" + meta : meta;
+            }
+            QQC2.ToolTip.text: chip.tipText
+            QQC2.ToolTip.visible: root.orientation === 0 && hover.hovered
+            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+
             RowLayout {
                 id: chipRow
                 // Left-align (not centerIn) so every entry's dot/name share a
