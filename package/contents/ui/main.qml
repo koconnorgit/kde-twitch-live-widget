@@ -1243,6 +1243,41 @@ PlasmoidItem {
                 }
             }
 
+            // ---- Twitch auth lost while another platform is still linked ----
+            // The full setup screen above only shows when NOTHING is linked, so a
+            // revoked/expired Twitch token (or a config-file hiccup) with Kick
+            // still connected would otherwise drop every Twitch channel silently —
+            // anyLinked stays true, no prompt appears, and the "please re-link"
+            // status is clobbered to "Nobody's live" on the next poll. Surface a
+            // focused, always-visible re-link prompt whenever Twitch channels are
+            // configured but Twitch isn't linked (and isn't mid-linking).
+            RowLayout {
+                Layout.fillWidth: true
+                visible: root.anyLinked && root.authState === "unlinked"
+                         && root.channelList().length > 0
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Icon {
+                    source: "dialog-warning"
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                }
+                PC3.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    opacity: 0.85
+                    font: Kirigami.Theme.smallFont
+                    text: i18n("Twitch isn't linked")
+                    style: Text.Outline
+                    styleColor: Qt.rgba(0, 0, 0, 0.6)
+                }
+                PC3.Button {
+                    icon.name: "link"
+                    text: i18n("Link")
+                    onClicked: root.startDeviceAuth()
+                }
+            }
+
             // ---- connected + nothing live: faint hint, only while hovered ----
             PC3.Label {
                 Layout.fillWidth: true
